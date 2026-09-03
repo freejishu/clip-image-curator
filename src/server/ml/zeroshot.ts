@@ -8,7 +8,7 @@ let loading: Promise<ZeroShotPipeline> | null = null;
 
 async function load(): Promise<ZeroShotPipeline> {
   const { pipeline, env } = await import('@huggingface/transformers');
-  env.cacheDir = path.join(config.dataDir, 'models');
+  const mc = path.join(config.dataDir, 'models'); env.cacheDir = mc; env.localModelPath = mc;
   const p = await pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32', { dtype: 'q8' });
   return p as unknown as ZeroShotPipeline;
 }
