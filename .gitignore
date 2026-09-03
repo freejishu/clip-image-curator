@@ -1,0 +1,6 @@
+﻿node_modules/
+data/
+dist/
+web/dist/
+*.local
+config.json

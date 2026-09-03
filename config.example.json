@@ -1,0 +1,18 @@
+﻿{
+  "port": 5176,
+  "dataDir": "./data",
+  "proxy": "http://127.0.0.1:12330",
+  "trainThreshold": 100,
+  "storage": {
+    "type": "local",
+    "incoming": "./data/incoming",
+    "favorites": "./data/favorites"
+  },
+  "sources": {
+    "yandere": { "enabled": true, "proxy": null }
+  },
+  "zeroshot": {
+    "positive": ["anime illustration of a girl wearing white thighhighs", "anime girl wearing white pantyhose tights"],
+    "negative": ["anime illustration without white legwear", "photo"]
+  }
+}

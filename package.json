@@ -1,0 +1,28 @@
+﻿{
+  "name": "image-curator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server/index.ts",
+    "dev:web": "vite web",
+    "typecheck": "tsc --noEmit",
+    "build:web": "vite build web"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.3.3",
+    "axios": "^1.7.9",
+    "fastify": "^5.2.0",
+    "https-proxy-agent": "^7.0.6",
+    "p-queue": "^8.0.1",
+    "socks-proxy-agent": "^8.0.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vue": "^3.5.13"
+  }
+}
