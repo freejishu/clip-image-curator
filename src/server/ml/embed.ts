@@ -16,7 +16,7 @@ let loading: Promise<FeaturePipeline> | null = null;
 async function loadFeaturePipeline(): Promise<FeaturePipeline> {
   const { pipeline, env } = await import('@huggingface/transformers');
   env.cacheDir = cacheDir;
-  const p = await pipeline('image-feature-extraction', MODEL_ID);
+  const p = await pipeline('image-feature-extraction', MODEL_ID, { dtype: 'q8' });
   return p as unknown as FeaturePipeline;
 }
 

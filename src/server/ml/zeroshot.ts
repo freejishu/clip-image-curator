@@ -1,4 +1,5 @@
-﻿import { config } from '../config.js';
+﻿import path from 'node:path';
+import { config } from '../config.js';
 import { db } from '../db.js';
 
 type ZeroShotPipeline = (image: string, labels: string[]) => Promise<{ score: number; label: string }[]>;
@@ -6,8 +7,9 @@ let pipe: ZeroShotPipeline | null = null;
 let loading: Promise<ZeroShotPipeline> | null = null;
 
 async function load(): Promise<ZeroShotPipeline> {
-  const { pipeline } = await import('@huggingface/transformers');
-  const p = await pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32');
+  const { pipeline, env } = await import('@huggingface/transformers');
+  env.cacheDir = path.join(config.dataDir, 'models');
+  const p = await pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32', { dtype: 'q8' });
   return p as unknown as ZeroShotPipeline;
 }
 
