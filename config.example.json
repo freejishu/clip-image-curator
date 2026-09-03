@@ -9,7 +9,7 @@
     "favorites": "./data/favorites"
   },
   "sources": {
-    "yandere": { "enabled": true, "proxy": null }
+    "yandere": { "enabled": true, "proxy": null }, "mock": { "enabled": true }
   },
   "zeroshot": {
     "positive": ["anime illustration of a girl wearing white thighhighs", "anime girl wearing white pantyhose tights"],

@@ -1,0 +1,240 @@
+﻿<script setup lang="ts">
+import { ref, onMounted, onUnmounted } from 'vue';
+import { api, type NextImage, type Task, type Stats } from './api';
+
+const tab = ref<'rate' | 'review' | 'tasks' | 'model'>('rate');
+
+// ---- 打分 ----
+const mode = ref<'smart' | 'sequential'>('smart');
+const current = ref<NextImage | null>(null);
+const remaining = ref(0);
+const allDone = ref(false);
+const loading = ref(false);
+let preload: string | null = null;
+
+async function loadNext() {
+  loading.value = true;
+  try {
+    const r = await api.next(mode.value);
+    allDone.value = r.done;
+    current.value = r.image ?? null;
+    remaining.value = r.remaining ?? 0;
+    if (current.value) preload = `/api/images/${current.value.id}/file`;
+  } finally { loading.value = false; }
+}
+
+async function label(label_: string) {
+  if (!current.value || loading.value) return;
+  const id = current.value.id;
+  loading.value = true; // 防连击
+  try { await api.label(id, label_); } finally { loading.value = false; }
+  await loadNext();
+}
+
+function onKey(e: KeyboardEvent) {
+  if (tab.value !== 'rate') return;
+  if (e.key === '1') label('like');
+  else if (e.key === '2') label('dislike');
+  else if (e.key === '3') label('skip');
+}
+
+// ---- 任务 ----
+const tasks = ref<Task[]>([]);
+const sources = ref<{ name: string; enabled: boolean }[]>([]);
+const newTask = ref({ source: 'yandere', tags: '', limit: 100, proxy: '' });
+async function refreshTasks() { tasks.value = await api.tasks(); }
+async function createTask() {
+  const tags = newTask.value.tags.split(/\s+/).filter(Boolean);
+  if (!tags.length) return alert('请输入至少一个 tag');
+  await api.createTask(newTask.value.source, tags, newTask.value.limit, newTask.value.proxy);
+  newTask.value.tags = '';
+  await refreshTasks();
+}
+
+// ---- 统计与模型 ----
+const stats = ref<Stats | null>(null);
+const prefs = ref<{ trained: boolean; version?: number; samples?: number; positive?: [string, number][]; negative?: [string, number][] } | null>(null);
+const trainState = ref<{ status: string; progress: string; error?: string }>({ status: 'idle', progress: '' });
+let pollTimer: number | undefined;
+
+async function refreshModel() {
+  stats.value = await api.stats();
+  prefs.value = await api.preferences();
+  trainState.value = await api.trainStatus();
+}
+async function startTrain() { await api.train(); pollTrain(); }
+async function startZeroshot() { await api.zeroshot(); pollTrain(); }
+function pollTrain() {
+  window.clearInterval(pollTimer);
+  pollTimer = window.setInterval(async () => {
+    trainState.value = await api.trainStatus();
+    if (trainState.value.status !== 'running') { window.clearInterval(pollTimer); await refreshModel(); }
+  }, 1500);
+}
+
+// ---- 审查/修正 ----
+const reviewFilter = ref<'like' | 'pred'>('pred');
+const reviewList = ref<(NextImage & { user_label: string | null })[]>([]);
+const reviewPage = ref(1);
+async function refreshReview() {
+  reviewList.value = reviewFilter.value === 'like'
+    ? await api.list(`label=like&page=${reviewPage.value}`)
+    : await api.list(`minScore=0.5&page=${reviewPage.value}`);
+}
+async function relabel(id: number, label_: string) {
+  await api.label(id, label_);
+  await refreshReview();
+}
+
+onMounted(async () => {
+  window.addEventListener('keydown', onKey);
+  sources.value = await api.sources();
+  await Promise.all([loadNext(), refreshTasks(), refreshModel(), refreshReview()]);
+});
+onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearInterval(pollTimer); });
+</script>
+
+<template>
+  <div class="app">
+    <header>
+      <h1>image-curator</h1>
+      <nav>
+        <button :class="{ on: tab === 'rate' }" @click="tab = 'rate'">打分</button>
+        <button :class="{ on: tab === 'review' }" @click="tab = 'review'; refreshReview()">审查修正</button>
+        <button :class="{ on: tab === 'tasks' }" @click="tab = 'tasks'; refreshTasks()">抓取任务</button>
+        <button :class="{ on: tab === 'model' }" @click="tab = 'model'; refreshModel()">模型与偏好</button>
+      </nav>
+    </header>
+
+    <!-- 打分 -->
+    <section v-if="tab === 'rate'" class="rate">
+      <div class="toolbar">
+        <label><input type="checkbox" :checked="mode === 'smart'" @change="mode = ($event.target as HTMLInputElement).checked ? 'smart' : 'sequential'; loadNext()"> 智能排序（按预测分）</label>
+        <span>待标注: {{ remaining }}</span>
+        <span v-if="current?.pred_score != null">预测分: {{ current.pred_score.toFixed(3) }}</span>
+      </div>
+      <div v-if="allDone" class="empty">🎉 全部标注完成</div>
+      <div v-else-if="current" class="stage">
+        <img :src="`/api/images/${current.id}/file`" :key="current.id" alt="">
+        <div class="meta">
+          <a :href="current.page_url" target="_blank">{{ current.source }} #{{ current.source_id }}</a>
+          <div class="tags">{{ current.tags.slice(0, 12).join(' ') }}</div>
+        </div>
+        <div class="actions">
+          <button class="like" @click="label('like')">1 喜欢 ♥</button>
+          <button class="dislike" @click="label('dislike')">2 不喜欢 ✕</button>
+          <button class="skip" @click="label('skip')">3 跳过 →</button>
+        </div>
+      </div>
+      <div v-else class="empty">加载中…</div>
+    </section>
+
+    <!-- 审查修正 -->
+    <section v-else-if="tab === 'review'">
+      <div class="toolbar">
+        <button :class="{ on: reviewFilter === 'pred' }" @click="reviewFilter = 'pred'; reviewPage = 1; refreshReview()">预测喜欢（待确认）</button>
+        <button :class="{ on: reviewFilter === 'like' }" @click="reviewFilter = 'like'; reviewPage = 1; refreshReview()">已喜欢</button>
+        <button @click="reviewPage--; refreshReview()">上一页</button>
+        <span>第 {{ reviewPage }} 页</span>
+        <button @click="reviewPage++; refreshReview()">下一页</button>
+      </div>
+      <div class="grid">
+        <figure v-for="img in reviewList" :key="img.id">
+          <img :src="`/api/images/${img.id}/file`" loading="lazy" alt="">
+          <figcaption>
+            <span v-if="img.pred_score != null">{{ img.pred_score.toFixed(2) }}</span>
+            <span class="lbl">{{ img.user_label ?? '未标注' }}</span>
+            <button @click="relabel(img.id, 'like')">♥</button>
+            <button @click="relabel(img.id, 'dislike')">✕</button>
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- 抓取任务 -->
+    <section v-else-if="tab === 'tasks'">
+      <form class="new-task" @submit.prevent="createTask">
+        <select v-model="newTask.source">
+          <option v-for="s in sources" :key="s.name" :value="s.name" :disabled="!s.enabled">{{ s.name }}</option>
+        </select>
+        <input v-model="newTask.tags" placeholder="tags（空格分隔），如 white_thighhighs rating:s">
+        <input v-model.number="newTask.limit" type="number" min="1" max="2000" style="width:90px">
+        <input v-model="newTask.proxy" placeholder="代理（留空用默认）" style="width:200px">
+        <button type="submit">开始抓取</button>
+      </form>
+      <table>
+        <thead><tr><th>ID</th><th>源</th><th>查询</th><th>状态</th><th>进度</th><th>错误</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr v-for="t in tasks" :key="t.id">
+            <td>{{ t.id }}</td><td>{{ t.source }}</td><td>{{ JSON.parse(t.query).tags.join(' ') }}</td>
+            <td>{{ t.status }}</td><td>{{ t.downloaded }}/{{ t.target }}</td><td>{{ t.error }}</td>
+            <td>
+              <button v-if="t.status === 'running'" @click="api.pauseTask(t.id).then(refreshTasks)">暂停</button>
+              <button v-if="t.status === 'paused' || t.status === 'error'" @click="api.resumeTask(t.id).then(refreshTasks)">继续</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 模型与偏好 -->
+    <section v-else>
+      <div v-if="stats" class="stats">
+        <span>总数 {{ stats.total }}</span><span>已下载 {{ stats.downloaded }}</span>
+        <span class="c-like">喜欢 {{ stats.liked }}</span><span class="c-dislike">不喜欢 {{ stats.disliked }}</span>
+        <span>跳过 {{ stats.skipped }}</span><span>待标注 {{ stats.unlabeled }}</span><span>已向量化 {{ stats.withEmbedding }}</span>
+      </div>
+      <div class="train-box">
+        <button @click="startTrain" :disabled="trainState.status === 'running' || (stats?.liked ?? 0) + (stats?.disliked ?? 0) < 10">训练模型（需 ≥10 条标注）</button>
+        <button @click="startZeroshot" :disabled="trainState.status === 'running'">Zero-shot 冷启动粗筛</button>
+        <span v-if="trainState.status === 'running'">⏳ {{ trainState.progress }}</span>
+        <span v-else-if="trainState.status === 'error'" class="c-dislike">✕ {{ trainState.error }}</span>
+        <span v-else-if="trainState.status === 'done'">✓ 完成</span>
+      </div>
+      <div v-if="prefs?.trained" class="prefs">
+        <p>模型 v{{ prefs.version }} · {{ prefs.samples }} 条样本</p>
+        <div class="pref-cols">
+          <div><h3>喜欢的元素</h3><ol><li v-for="[t, w] in prefs.positive" :key="t">{{ t }} <em>{{ w.toFixed(2) }}</em></li></ol></div>
+          <div><h3>不喜欢的元素</h3><ol><li v-for="[t, w] in prefs.negative" :key="t">{{ t }} <em>{{ w.toFixed(2) }}</em></li></ol></div>
+        </div>
+      </div>
+      <p v-else>尚未训练。先标注一批图片（或先跑 zero-shot 粗筛提高标注效率），然后点"训练模型"。</p>
+    </section>
+  </div>
+</template>
+
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; background: #14161a; color: #e6e6e6; }
+.app { max-width: 1100px; margin: 0 auto; padding: 12px; }
+header { display: flex; align-items: center; gap: 16px; }
+h1 { font-size: 18px; margin: 0; }
+nav button, .toolbar button { background: #23262d; color: #ccc; border: 1px solid #333; padding: 6px 14px; border-radius: 6px; cursor: pointer; }
+nav button.on, .toolbar button.on { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+section { margin-top: 16px; }
+.toolbar { display: flex; gap: 14px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.stage img { max-width: 100%; max-height: 62vh; display: block; margin: 0 auto; border-radius: 8px; background: #000; }
+.meta { text-align: center; margin: 8px 0; color: #999; }
+.meta a { color: #7ab3ff; }
+.tags { font-size: 12px; }
+.actions { display: flex; justify-content: center; gap: 16px; margin-top: 10px; }
+.actions button { font-size: 18px; padding: 12px 32px; border-radius: 8px; border: none; cursor: pointer; }
+.like { background: #e5484d; color: #fff; } .dislike { background: #697177; color: #fff; } .skip { background: #23262d; color: #ccc; border: 1px solid #444 !important; }
+.empty { text-align: center; padding: 80px 0; color: #888; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.grid figure { margin: 0; background: #1d2026; border-radius: 6px; overflow: hidden; }
+.grid img { width: 100%; height: 150px; object-fit: cover; display: block; }
+.grid figcaption { display: flex; gap: 6px; padding: 4px 6px; font-size: 12px; align-items: center; }
+.grid .lbl { flex: 1; color: #888; }
+.new-task { display: flex; gap: 8px; margin-bottom: 14px; }
+.new-task input, .new-task select { background: #1d2026; border: 1px solid #333; color: #eee; padding: 8px; border-radius: 6px; flex: 1; }
+.new-task button, .train-box button { background: #3b82f6; border: none; color: #fff; padding: 8px 18px; border-radius: 6px; cursor: pointer; }
+.train-box button:disabled { opacity: .4; cursor: not-allowed; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { border-bottom: 1px solid #2a2d34; padding: 6px 8px; text-align: left; }
+.stats { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; }
+.c-like { color: #ff8a8e; } .c-dislike { color: #9ba1a6; }
+.train-box { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+.pref-cols { display: flex; gap: 40px; }
+.pref-cols em { color: #888; font-size: 12px; }
+</style>

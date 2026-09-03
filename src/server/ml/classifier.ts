@@ -1,0 +1,134 @@
+﻿import { db, getMeta, setMeta } from '../db.js';
+import { embedImage } from './embed.js';
+
+/** 逻辑回归模型（纯 TS 实现，梯度下降） */
+export interface Model {
+  version: number;
+  vocab: string[];          // tag one-hot 词表
+  dim: number;              // embedding 维度
+  weights: number[];        // dim + vocab.length
+  bias: number;
+  trainedAt: string;
+  samples: number;
+}
+
+const TAG_VOCAB_SIZE = 200;
+
+function buildVocab(): string[] {
+  const rows = db.prepare(`
+    SELECT tags FROM images WHERE user_label IN ('like','dislike')
+  `).all() as { tags: string }[];
+  const freq = new Map<string, number>();
+  for (const r of rows) {
+    for (const t of JSON.parse(r.tags) as string[]) freq.set(t, (freq.get(t) ?? 0) + 1);
+  }
+  return [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, TAG_VOCAB_SIZE).map(([t]) => t);
+}
+
+function featurize(embedding: Float32Array, tags: string[], vocab: string[], dim: number): number[] {
+  const feat = new Array<number>(dim + vocab.length).fill(0);
+  for (let i = 0; i < dim && i < embedding.length; i++) feat[i] = embedding[i];
+  const tagSet = new Set(tags);
+  vocab.forEach((t, i) => { if (tagSet.has(t)) feat[dim + i] = 1; });
+  return feat;
+}
+
+function sigmoid(x: number): number {
+  return x >= 0 ? 1 / (1 + Math.exp(-x)) : Math.exp(x) / (1 + Math.exp(x));
+}
+
+export async function ensureEmbedding(imageId: number): Promise<Float32Array | null> {
+  const row = db.prepare('SELECT embedding, local_path FROM images WHERE id = ?').get(imageId) as
+    { embedding: Buffer | null; local_path: string | null } | undefined;
+  if (!row?.local_path) return null;
+  if (row.embedding) return new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.length / 4);
+  const vec = await embedImage(row.local_path);
+  db.prepare('UPDATE images SET embedding = ? WHERE id = ?').run(Buffer.from(vec.buffer), imageId);
+  return vec;
+}
+
+export interface TrainResult { version: number; samples: number; likes: number; dislikes: number; scored: number }
+
+export async function train(onProgress?: (msg: string) => void): Promise<TrainResult> {
+  const labeled = db.prepare(`
+    SELECT id, tags, user_label FROM images
+    WHERE user_label IN ('like','dislike') AND local_path IS NOT NULL
+  `).all() as { id: number; tags: string; user_label: string }[];
+
+  const vocab = buildVocab();
+  const X: number[][] = [];
+  const y: number[] = [];
+  let dim = 0;
+  for (const row of labeled) {
+    const vec = await ensureEmbedding(row.id);
+    if (!vec) continue;
+    dim = vec.length;
+    X.push(featurize(vec, JSON.parse(row.tags) as string[], vocab, dim));
+    y.push(row.user_label === 'like' ? 1 : 0);
+    onProgress?.(`embedding ${X.length}/${labeled.length}`);
+  }
+  if (X.length < 10) throw new Error(`标注样本不足（${X.length}），至少需要 10 条喜欢/不喜欢标注`);
+
+  const n = X.length, d = X[0].length;
+  const weights = new Array<number>(d).fill(0);
+  let bias = 0;
+  const lr = 0.5, l2 = 1e-4, epochs = 400;
+  for (let e = 0; e < epochs; e++) {
+    const grad = new Array<number>(d).fill(0);
+    let gb = 0;
+    for (let i = 0; i < n; i++) {
+      let z = bias;
+      const xi = X[i];
+      for (let j = 0; j < d; j++) z += weights[j] * xi[j];
+      const err = sigmoid(z) - y[i];
+      for (let j = 0; j < d; j++) grad[j] += err * xi[j];
+      gb += err;
+    }
+    for (let j = 0; j < d; j++) weights[j] -= lr * (grad[j] / n + l2 * weights[j]);
+    bias -= lr * gb / n;
+  }
+
+  const version = Number(getMeta('model_version') ?? '0') + 1;
+  const model: Model = {
+    version, vocab, dim, weights, bias,
+    trainedAt: new Date().toISOString(), samples: n,
+  };
+  setMeta('model', JSON.stringify(model));
+  setMeta('model_version', String(version));
+
+  // 全量重打分（未标注 + 已标注都更新，便于审查页）
+  const all = db.prepare('SELECT id, tags FROM images WHERE local_path IS NOT NULL').all() as { id: number; tags: string }[];
+  let scored = 0;
+  for (const row of all) {
+    const vec = await ensureEmbedding(row.id);
+    if (!vec) continue;
+    const p = predictWith(model, featurize(vec, JSON.parse(row.tags) as string[], vocab, dim));
+    db.prepare('UPDATE images SET pred_score = ?, pred_version = ? WHERE id = ?').run(p, version, row.id);
+    scored++;
+    if (scored % 50 === 0) onProgress?.(`scoring ${scored}/${all.length}`);
+  }
+
+  const likes = y.filter(v => v === 1).length;
+  return { version, samples: n, likes, dislikes: n - likes, scored };
+}
+
+function predictWith(model: Model, feat: number[]): number {
+  let z = model.bias;
+  for (let j = 0; j < model.weights.length; j++) z += model.weights[j] * (feat[j] ?? 0);
+  return sigmoid(z);
+}
+
+export function loadModel(): Model | null {
+  const raw = getMeta('model');
+  return raw ? (JSON.parse(raw) as Model) : null;
+}
+
+/** 偏好解释：tag 特征权重排行 */
+export function tagPreferences(model: Model, top = 20): { positive: [string, number][]; negative: [string, number][] } {
+  const tagWeights = model.weights.slice(model.dim).map((w, i) => [model.vocab[i], w] as [string, number]);
+  tagWeights.sort((a, b) => b[1] - a[1]);
+  return {
+    positive: tagWeights.filter(([, w]) => w > 0).slice(0, top),
+    negative: tagWeights.filter(([, w]) => w < 0).slice(-top).reverse(),
+  };
+}
