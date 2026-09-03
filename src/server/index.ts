@@ -3,11 +3,16 @@ import fs from 'node:fs';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { config } from './config.js';
+import { db } from './db.js';
 import { taskRoutes } from './routes/tasks.js';
 import { imageRoutes } from './routes/images.js';
 import { trainRoutes } from './routes/train.js';
 
 const app = Fastify({ logger: true });
+
+// 进程重启后，上次仍在 running 的任务标记为 paused（可手动「继续」断点续跑）
+const stale = db.prepare(`UPDATE tasks SET status = 'paused' WHERE status = 'running'`).run();
+if (stale.changes > 0) console.log(`恢复提示: ${stale.changes} 个中断任务已标记为 paused`);
 
 taskRoutes(app);
 imageRoutes(app);
