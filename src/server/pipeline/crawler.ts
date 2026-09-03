@@ -49,6 +49,7 @@ export async function startTask(taskId: number): Promise<void> {
   try {
     for await (const batch of plugin.search({ tags: query.tags, limit: query.limit }, opts)) {
       if (state.paused) { touch(`status = 'paused'`); return; }
+      touch('seen = seen + ?', batch.length);
       let added = 0;
       for (const meta of batch) {
         if (insertImage(meta)) {

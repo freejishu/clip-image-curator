@@ -168,11 +168,11 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <button type="submit">开始抓取</button>
       </form>
       <table>
-        <thead><tr><th>ID</th><th>源</th><th>查询</th><th>状态</th><th>进度</th><th>错误</th><th>操作</th></tr></thead>
+        <thead><tr><th>ID</th><th>源</th><th>查询</th><th>状态</th><th>搜到/新增/下载</th><th>错误</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="t in tasks" :key="t.id">
             <td>{{ t.id }}</td><td>{{ t.source }}</td><td>{{ JSON.parse(t.query).tags.join(' ') }}</td>
-            <td>{{ t.status }}</td><td>{{ t.downloaded }}/{{ t.target }}</td><td>{{ t.error }}</td>
+            <td>{{ t.status }}</td><td>搜到 {{ t.seen ?? 0 }} · 新增 {{ t.fetched }} · 下载 {{ t.downloaded }}/{{ t.target }}</td><td>{{ t.error }}</td>
             <td>
               <button v-if="t.status === 'running'" @click="api.pauseTask(t.id).then(refreshTasks)">暂停</button>
               <button v-if="t.status === 'paused' || t.status === 'error'" @click="api.resumeTask(t.id).then(refreshTasks)">继续</button>

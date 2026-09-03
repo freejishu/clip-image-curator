@@ -43,7 +43,11 @@ export const yandere: SourcePlugin = {
       const { data } = await http.get<YanderePost[]>('/post.json', {
         params: { tags: query.tags.join(' '), limit: perPage, page },
       });
-      if (!Array.isArray(data) || data.length === 0) return;
+      if (!Array.isArray(data)) {
+        const reason = (data as { reason?: string; error?: string })?.reason ?? (data as { error?: string })?.error ?? JSON.stringify(data).slice(0, 200);
+        throw new Error(`yande.re API 返回错误: ${reason}`);
+      }
+      if (data.length === 0) return;
       const batch: ImageMeta[] = [];
       for (const p of data) {
         if (yielded >= query.limit) break;

@@ -4,7 +4,7 @@
 }
 export interface Task {
   id: number; source: string; query: string; status: string;
-  fetched: number; downloaded: number; target: number; error: string | null; updated_at: string;
+  fetched: number; downloaded: number; target: number; seen: number; error: string | null; updated_at: string;
 }
 export interface Stats {
   total: number; downloaded: number; liked: number; disliked: number;

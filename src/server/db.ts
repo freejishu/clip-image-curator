@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+try { db.exec('ALTER TABLE tasks ADD COLUMN seen INTEGER NOT NULL DEFAULT 0'); } catch { /* 已存在 */ }
 `);
 
 export interface ImageRow {
