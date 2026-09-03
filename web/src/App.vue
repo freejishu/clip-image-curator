@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { api, type NextImage, type Task, type Stats } from './api';
 
 const tab = ref<'rate' | 'review' | 'tasks' | 'model'>('rate');
@@ -43,6 +43,11 @@ const tasks = ref<Task[]>([]);
 const sources = ref<{ name: string; enabled: boolean }[]>([]);
 const newTask = ref({ source: 'yandere', tags: '', limit: 100, proxy: '' });
 async function refreshTasks() { tasks.value = await api.tasks(); }
+let taskTimer: number | undefined;
+watch(tab, (t) => {
+  window.clearInterval(taskTimer);
+  if (t === 'tasks') { refreshTasks(); taskTimer = window.setInterval(refreshTasks, 2000); } // 自动拉取进度
+});
 async function createTask() {
   const tags = newTask.value.tags.split(/\s+/).filter(Boolean);
   if (!tags.length) return alert('请输入至少一个 tag');
@@ -91,7 +96,7 @@ onMounted(async () => {
   sources.value = await api.sources();
   await Promise.all([loadNext(), refreshTasks(), refreshModel(), refreshReview()]);
 });
-onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearInterval(pollTimer); });
+onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearInterval(pollTimer); window.clearInterval(taskTimer); });
 </script>
 
 <template>

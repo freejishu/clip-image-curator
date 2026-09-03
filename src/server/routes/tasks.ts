@@ -14,7 +14,7 @@ export function taskRoutes(app: FastifyInstance) {
     }
     getSource(body.source); // 校验存在且启用
     const limit = Math.min(Math.max(body.limit ?? 100, 1), 2000);
-    const proxy = body.proxy !== undefined ? body.proxy : (config.sources[body.source]?.proxy ?? config.proxy);
+    const proxy = body.proxy || config.sources[body.source]?.proxy || config.proxy || null; // null/空串都回落到默认代理
     const r = db.prepare('INSERT INTO tasks (source, query, proxy, target) VALUES (?, ?, ?, ?)')
       .run(body.source, JSON.stringify({ tags: body.tags, limit }), proxy ?? null, limit);
     const id = Number(r.lastInsertRowid);
