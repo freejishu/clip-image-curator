@@ -60,7 +60,7 @@ export function imageRoutes(app: FastifyInstance) {
     const size = 60;
     const conds: string[] = ['local_path IS NOT NULL'];
     const args: (string | number)[] = [];
-    if (q.label) { conds.push('user_label = ?'); args.push(q.label); }
+    if (q.label === 'none') { conds.push('user_label IS NULL'); } else if (q.label) { conds.push('user_label = ?'); args.push(q.label); }
     if (q.minScore) { conds.push('pred_score >= ?'); args.push(Number(q.minScore)); }
     const rows = db.prepare(`
       SELECT id, source, source_id, page_url, tags, user_label, pred_score FROM images

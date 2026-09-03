@@ -47,7 +47,20 @@ let taskTimer: number | undefined;
 watch(tab, (t) => {
   window.clearInterval(taskTimer);
   if (t === 'tasks') { refreshTasks(); taskTimer = window.setInterval(refreshTasks, 2000); } // 自动拉取进度
+  if (t === 'rate') loadNext(); // 回到打分页：按最新预测分重新取第一张
+  if (t === 'review') refreshReview();
+  if (t === 'model') refreshModel();
 });
+
+function predText(s: number | null | undefined): string {
+  return s == null ? '无预测分' : `预测 ${(s * 100).toFixed(1)}%`;
+}
+function predClass(s: number | null | undefined): string {
+  if (s == null) return 'pred-none';
+  if (s >= 0.7) return 'pred-high';
+  if (s >= 0.4) return 'pred-mid';
+  return 'pred-low';
+}
 async function createTask() {
   const tags = newTask.value.tags.split(/\s+/).filter(Boolean);
   if (!tags.length) return alert('请输入至少一个 tag');
@@ -78,13 +91,13 @@ function pollTrain() {
 }
 
 // ---- 审查/修正 ----
-const reviewFilter = ref<'like' | 'pred'>('pred');
+const reviewFilter = ref<'like' | 'pred' | 'predNew'>('predNew');
 const reviewList = ref<(NextImage & { user_label: string | null })[]>([]);
 const reviewPage = ref(1);
 async function refreshReview() {
-  reviewList.value = reviewFilter.value === 'like'
-    ? await api.list(`label=like&page=${reviewPage.value}`)
-    : await api.list(`minScore=0.5&page=${reviewPage.value}`);
+  if (reviewFilter.value === 'like') reviewList.value = await api.list(`label=like&page=${reviewPage.value}`);
+  else if (reviewFilter.value === 'predNew') reviewList.value = await api.list(`minScore=0.5&label=none&page=${reviewPage.value}`);
+  else reviewList.value = await api.list(`minScore=0.5&page=${reviewPage.value}`);
 }
 async function relabel(id: number, label_: string) {
   await api.label(id, label_);
@@ -103,11 +116,11 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
   <div class="app">
     <header>
       <h1>image-curator</h1>
-      <nav>
-        <button :class="{ on: tab === 'rate' }" @click="tab = 'rate'">打分</button>
-        <button :class="{ on: tab === 'review' }" @click="tab = 'review'; refreshReview()">审查修正</button>
-        <button :class="{ on: tab === 'tasks' }" @click="tab = 'tasks'; refreshTasks()">抓取任务</button>
-        <button :class="{ on: tab === 'model' }" @click="tab = 'model'; refreshModel()">模型与偏好</button>
+      <nav class="menu">
+        <button :class="{ on: tab === 'rate' }" @click="tab = 'rate'">🖊️ 打分</button>
+        <button :class="{ on: tab === 'review' }" @click="tab = 'review'">🔍 审查修正</button>
+        <button :class="{ on: tab === 'tasks' }" @click="tab = 'tasks'">⬇️ 抓取任务</button>
+        <button :class="{ on: tab === 'model' }" @click="tab = 'model'">🧠 模型与偏好</button>
       </nav>
     </header>
 
@@ -116,7 +129,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       <div class="toolbar">
         <label><input type="checkbox" :checked="mode === 'smart'" @change="mode = ($event.target as HTMLInputElement).checked ? 'smart' : 'sequential'; loadNext()"> 智能排序（按预测分）</label>
         <span>待标注: {{ remaining }}</span>
-        <span v-if="current?.pred_score != null">预测分: {{ current.pred_score.toFixed(3) }}</span>
+        <span class="pred-badge" :class="predClass(current?.pred_score)">{{ predText(current?.pred_score) }}</span>
       </div>
       <div v-if="allDone" class="empty">🎉 全部标注完成</div>
       <div v-else-if="current" class="stage">
@@ -137,7 +150,8 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
     <!-- 审查修正 -->
     <section v-else-if="tab === 'review'">
       <div class="toolbar">
-        <button :class="{ on: reviewFilter === 'pred' }" @click="reviewFilter = 'pred'; reviewPage = 1; refreshReview()">预测喜欢（待确认）</button>
+        <button :class="{ on: reviewFilter === 'predNew' }" @click="reviewFilter = 'predNew'; reviewPage = 1; refreshReview()">未标注·预测喜欢</button>
+        <button :class="{ on: reviewFilter === 'pred' }" @click="reviewFilter = 'pred'; reviewPage = 1; refreshReview()">全盘·预测喜欢</button>
         <button :class="{ on: reviewFilter === 'like' }" @click="reviewFilter = 'like'; reviewPage = 1; refreshReview()">已喜欢</button>
         <button @click="reviewPage--; refreshReview()">上一页</button>
         <span>第 {{ reviewPage }} 页</span>
@@ -214,8 +228,17 @@ body { margin: 0; font-family: system-ui, sans-serif; background: #14161a; color
 .app { max-width: 1100px; margin: 0 auto; padding: 12px; }
 header { display: flex; align-items: center; gap: 16px; }
 h1 { font-size: 18px; margin: 0; }
-nav button, .toolbar button { background: #23262d; color: #ccc; border: 1px solid #333; padding: 6px 14px; border-radius: 6px; cursor: pointer; }
-nav button.on, .toolbar button.on { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+.menu { display: flex; gap: 8px; background: #1d2026; padding: 6px; border-radius: 12px; }
+.menu button { background: transparent; color: #9ba1a6; border: none; padding: 9px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; transition: all .15s; }
+.menu button:hover { color: #e6e6e6; background: #2a2d34; }
+.menu button.on { background: #3b82f6; color: #fff; font-weight: 600; }
+.toolbar button { background: #23262d; color: #ccc; border: 1px solid #333; padding: 6px 14px; border-radius: 6px; cursor: pointer; }
+.toolbar button.on { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+.pred-badge { display: inline-block; padding: 4px 14px; border-radius: 999px; font-weight: 600; font-size: 14px; }
+.pred-high { background: #1f6f43; color: #a7f3c9; }
+.pred-mid { background: #6b5b1f; color: #f3e3a7; }
+.pred-low { background: #4a2326; color: #f3a7a7; }
+.pred-none { background: #23262d; color: #888; }
 section { margin-top: 16px; }
 .toolbar { display: flex; gap: 14px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
 .stage img { max-width: 100%; max-height: 62vh; display: block; margin: 0 auto; border-radius: 8px; background: #000; }
