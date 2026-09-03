@@ -91,14 +91,21 @@ function pollTrain() {
 }
 
 // ---- 审查/修正 ----
-const reviewFilter = ref<'like' | 'pred' | 'predNew'>('predNew');
+type ReviewFilter = 'predNewLike' | 'predNewDislike' | 'predAllLike' | 'predAllDislike' | 'like';
+const reviewFilter = ref<ReviewFilter>('predNewLike');
 const reviewList = ref<(NextImage & { user_label: string | null })[]>([]);
 const reviewPage = ref(1);
+const REVIEW_PARAMS: Record<ReviewFilter, string> = {
+  predNewLike: 'minScore=0.5&label=none&sort=desc',
+  predNewDislike: 'maxScore=0.5&label=none&sort=asc',
+  predAllLike: 'minScore=0.5&sort=desc',
+  predAllDislike: 'maxScore=0.5&sort=asc',
+  like: 'label=like',
+};
 async function refreshReview() {
-  if (reviewFilter.value === 'like') reviewList.value = await api.list(`label=like&page=${reviewPage.value}`);
-  else if (reviewFilter.value === 'predNew') reviewList.value = await api.list(`minScore=0.5&label=none&page=${reviewPage.value}`);
-  else reviewList.value = await api.list(`minScore=0.5&page=${reviewPage.value}`);
+  reviewList.value = await api.list(`${REVIEW_PARAMS[reviewFilter.value]}&page=${reviewPage.value}`);
 }
+function setReviewFilter(f: ReviewFilter) { reviewFilter.value = f; reviewPage.value = 1; refreshReview(); }
 async function relabel(id: number, label_: string) {
   await api.label(id, label_);
   await refreshReview();
@@ -150,9 +157,11 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
     <!-- 审查修正 -->
     <section v-else-if="tab === 'review'">
       <div class="toolbar">
-        <button :class="{ on: reviewFilter === 'predNew' }" @click="reviewFilter = 'predNew'; reviewPage = 1; refreshReview()">未标注·预测喜欢</button>
-        <button :class="{ on: reviewFilter === 'pred' }" @click="reviewFilter = 'pred'; reviewPage = 1; refreshReview()">全盘·预测喜欢</button>
-        <button :class="{ on: reviewFilter === 'like' }" @click="reviewFilter = 'like'; reviewPage = 1; refreshReview()">已喜欢</button>
+        <button :class="{ on: reviewFilter === 'predNewLike' }" @click="setReviewFilter('predNewLike')">未标注·预测喜欢</button>
+        <button :class="{ on: reviewFilter === 'predNewDislike' }" @click="setReviewFilter('predNewDislike')">未标注·预测不喜欢</button>
+        <button :class="{ on: reviewFilter === 'predAllLike' }" @click="setReviewFilter('predAllLike')">全盘·预测喜欢</button>
+        <button :class="{ on: reviewFilter === 'predAllDislike' }" @click="setReviewFilter('predAllDislike')">全盘·预测不喜欢</button>
+        <button :class="{ on: reviewFilter === 'like' }" @click="setReviewFilter('like')">已喜欢</button>
         <button @click="reviewPage--; refreshReview()">上一页</button>
         <span>第 {{ reviewPage }} 页</span>
         <button @click="reviewPage++; refreshReview()">下一页</button>
