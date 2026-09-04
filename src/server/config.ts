@@ -4,6 +4,7 @@ import path from 'node:path';
 export interface SourceConfig { enabled: boolean; proxy?: string | null }
 export interface AppConfig {
   port: number;
+  host?: string;
   dataDir: string;
   proxy: string | null;
   trainThreshold: number;

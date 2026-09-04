@@ -50,5 +50,5 @@ if (fs.existsSync(webDist)) {
   });
 }
 
-await app.listen({ port: config.port, host: '127.0.0.1' });
+await app.listen({ port: config.port, host: config.host ?? '127.0.0.1' });
 console.log(`image-curator 已启动: http://127.0.0.1:${config.port}`);

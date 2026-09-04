@@ -1,5 +1,6 @@
 ﻿{
   "port": 5176,
+  "host": "0.0.0.0",
   "dataDir": "./data",
   "proxy": "http://127.0.0.1:12330",
   "trainThreshold": 100,

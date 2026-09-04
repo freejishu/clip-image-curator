@@ -88,7 +88,7 @@ async function refreshAlbum() {
     arr.push(r);
     map.set(key, arr);
   }
-  albumGroups.value = [...map.entries()].map(([key, items]) => ({ key, items, hoverIdx: 0 }));
+  albumGroups.value = [...map.entries()].map(([key, items]) => ({ key, items, hoverIdx: 0 })).sort((a, b) => b.items.length - a.items.length); // 多变体组排前面
 }
 function albumHover(g: AlbumGroup, on: boolean) {
   if (!on) { g.hoverIdx = 0; return; }
@@ -148,7 +148,7 @@ async function relabel(id: number, label_: string) {
 onMounted(async () => {
   window.addEventListener('keydown', onKey);
   sources.value = await api.sources();
-  await Promise.all([loadNext(), refreshTasks(), refreshModel(), refreshReview()]);
+  await Promise.all([loadNext(), refreshTasks(), refreshModel(), refreshReview(), refreshAlbum()]);
 });
 const lightbox = ref<(NextImage & { user_label?: string | null }) | null>(null);
 onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearInterval(pollTimer); window.clearInterval(taskTimer); });
