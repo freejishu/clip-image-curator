@@ -160,7 +160,7 @@ async function refreshReview() {
 function setReviewFilter(f: ReviewFilter) { reviewFilter.value = f; reviewPage.value = 1; refreshReview(); }
 async function relabel(id: number, label_: string) {
   await api.label(id, label_);
-  await refreshReview();
+  await Promise.all([refreshReview(), refreshAlbum()]);
 }
 
 onMounted(async () => {
@@ -168,7 +168,33 @@ onMounted(async () => {
   sources.value = await api.sources();
   await Promise.all([loadNext(), refreshTasks(), refreshModel(), refreshReview(), refreshAlbum()]);
 });
-const lightbox = ref<(NextImage & { user_label?: string | null }) | null>(null);
+type LbImage = NextImage & { user_label?: string | null; parent_id?: number | null; labeled_at?: string | null };
+interface LightboxState { items: LbImage[]; mainIdx: number; peekIdx: number }
+const lightbox = ref<LightboxState | null>(null);
+const lens = ref({ on: false, x: 0, y: 0 });
+let savedScroll = 0;
+
+function openLightbox(items: LbImage[], mainIdx = 0) {
+  lightbox.value = { items, mainIdx, peekIdx: items.length > 1 ? (mainIdx === 0 ? 1 : 0) : 0 };
+  lens.value.on = false;
+}
+function lbMain(): LbImage { const l = lightbox.value!; return l.items[l.mainIdx]; }
+function lbPeek(): LbImage { const l = lightbox.value!; return l.items[l.peekIdx]; }
+function nextIdx(cur: number, skip: number, n: number): number { let i = cur; do { i = (i + 1) % n; } while (i === skip); return i; }
+function lbSwap() { const l = lightbox.value!; [l.mainIdx, l.peekIdx] = [l.peekIdx, l.mainIdx]; }
+function lbMainNext() { const l = lightbox.value!; l.mainIdx = nextIdx(l.mainIdx, l.peekIdx, l.items.length); lens.value.on = false; }
+function lbPeekNext() { const l = lightbox.value!; l.peekIdx = nextIdx(l.peekIdx, l.mainIdx, l.items.length); }
+function lensMove(e: PointerEvent) {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  lens.value = { on: true, x: e.clientX - r.left, y: e.clientY - r.top };
+}
+function lensEnd() { lens.value.on = false; }
+
+// 灯箱开关时锁定/还原页面滚动（修复关闭后回到顶部）
+watch(lightbox, (val) => {
+  if (val) { savedScroll = window.scrollY; document.body.style.overflow = 'hidden'; }
+  else { document.body.style.overflow = ''; requestAnimationFrame(() => window.scrollTo(0, savedScroll)); }
+});
 onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearInterval(pollTimer); window.clearInterval(taskTimer); });
 </script>
 
@@ -222,7 +248,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       </div>
       <div class="grid">
         <figure v-for="img in reviewList" :key="img.id">
-          <img :src="`/api/images/${img.id}/thumb`" loading="lazy" alt="" style="cursor:zoom-in" @click="lightbox = img">
+          <img :src="`/api/images/${img.id}/thumb`" loading="lazy" alt="" style="cursor:zoom-in" @click="openLightbox([img])">
           <figcaption>
             <span v-if="img.pred_score != null">{{ img.pred_score.toFixed(2) }}</span>
             <span class="lbl">{{ img.user_label ?? '未标注' }}</span>
@@ -233,15 +259,28 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       </div>
     </section>
 
-    <!-- 大图灯箱 -->
+    <!-- 大图灯箱（含透镜透视） -->
     <div v-if="lightbox" class="lightbox" @click="lightbox = null">
-      <img :src="`/api/images/${lightbox.id}/file`" alt="" @click.stop>
+      <div class="lb-stage" @click.stop
+           @pointermove="lensMove" @pointerdown="lensMove" @pointerup="lensEnd" @pointerleave="lensEnd">
+        <img class="lb-main" :src="`/api/images/${lbMain().id}/file`" alt="" draggable="false">
+        <img v-if="lightbox.items.length > 1" class="lb-peek" :src="`/api/images/${lbPeek().id}/file`" alt="" draggable="false"
+             :style="{ clipPath: lens.on ? `circle(130px at ${lens.x}px ${lens.y}px)` : 'circle(0px at 0px 0px)' }">
+      </div>
       <div class="lb-bar" @click.stop>
-        <span class="pred-badge" :class="predClass(lightbox.pred_score)">{{ predText(lightbox.pred_score) }}</span>
-        <button class="like" @click="relabel(lightbox.id, 'like'); lightbox = null">♥ 喜欢</button>
-        <button class="dislike" @click="relabel(lightbox.id, 'dislike'); lightbox = null">✕ 不喜欢</button>
-        <a :href="lightbox.page_url" target="_blank">原页面 ↗</a>
-        <span class="lb-hint">ESC / 点击空白处关闭</span>
+        <span class="pred-badge" :class="predClass(lbMain().pred_score)">{{ predText(lbMain().pred_score) }}</span>
+        <button class="like" @click="relabel(lbMain().id, 'like'); lightbox = null">♥ 喜欢</button>
+        <button class="dislike" @click="relabel(lbMain().id, 'dislike'); lightbox = null">✕ 不喜欢</button>
+        <template v-if="lightbox.items.length > 1">
+          <button class="lb-btn" @click="lbSwap">⇄ 主/里互换</button>
+          <template v-if="lightbox.items.length > 2">
+            <button class="lb-btn" @click="lbMainNext">主图 ▸</button>
+            <button class="lb-btn" @click="lbPeekNext">里图 ▸</button>
+          </template>
+          <span class="lb-hint">{{ lightbox.mainIdx + 1 }}/{{ lightbox.items.length }} · 按住图片移动查看透视</span>
+        </template>
+        <a :href="lbMain().page_url" target="_blank">原页面 ↗</a>
+        <span class="lb-hint">ESC 关闭</span>
       </div>
     </div>
 
@@ -254,9 +293,8 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <span v-if="!backfilling && backfillTotal > 0" class="c-ok">✓ 上次回填 {{ backfillTotal }} 张</span>
       </div>
       <div class="grid">
-        <figure v-for="g in albumGroups" :key="g.key" class="stack" @mouseenter="albumHover(g, true)" @mouseleave="albumHover(g, false)">
-          <img v-for="(img, i) in g.items" :key="img.id" :src="`/api/images/${img.id}/thumb`" loading="lazy" alt=""
-               :class="{ shown: i === g.hoverIdx }" @click="lightbox = img">
+        <figure v-for="g in albumGroups" :key="g.key" class="stack">
+          <img :src="`/api/images/${g.items[0].id}/thumb`" loading="lazy" alt="" class="shown" style="cursor:zoom-in" @click="openLightbox(g.items, 0)">
           <span v-if="g.items.length > 1" class="layers">⇄ {{ g.items.length }}</span>
         </figure>
       </div>
@@ -365,7 +403,29 @@ figure.stack img { position: absolute; inset: 0; opacity: 0; transition: opacity
 figure.stack img.shown { opacity: 1; }
 figure.stack .layers { position: absolute; right: 4px; top: 4px; z-index: 2; background: rgba(0,0,0,.65); color: #ffd479; font-size: 11px; padding: 1px 7px; border-radius: 999px; pointer-events: none; }
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
-.lightbox img { max-width: 94vw; max-height: 82vh; border-radius: 8px; }
+.lb-stage { position: relative; max-width: 94vw; max-height: 82vh; touch-action: none; user-select: none; }
+.lb-main { max-width: 94vw; max-height: 82vh; border-radius: 8px; display: block; }
+.lb-peek { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; border-radius: 8px; transition: clip-path .08s linear; pointer-events: none; }
+.lb-btn { background: #2a2d34; color: #ffd479; border: 1px solid #444; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+/* 移动端适配 */
+@media (max-width: 640px) {
+  .app { padding: 8px; }
+  header { flex-direction: column; align-items: stretch; gap: 8px; }
+  h1 { text-align: center; }
+  .menu { overflow-x: auto; justify-content: flex-start; }
+  .menu button { padding: 8px 14px; font-size: 13px; white-space: nowrap; }
+  .stage img { max-height: 48vh; }
+  .actions { position: sticky; bottom: 0; background: #14161a; padding: 10px 0; gap: 8px; }
+  .actions button { font-size: 16px; padding: 14px 18px; flex: 1; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 6px; }
+  .grid img, figure.stack { height: 110px; }
+  .new-task { flex-wrap: wrap; }
+  .new-task input, .new-task select { flex: 1 1 45%; }
+  .lb-bar { flex-wrap: wrap; justify-content: center; max-width: 94vw; }
+  .lb-stage, .lb-main { max-height: 62vh; }
+  .toolbar { font-size: 13px; }
+  table { font-size: 12px; }
+}
 .lb-bar { display: flex; gap: 12px; align-items: center; background: #1d2026; padding: 10px 18px; border-radius: 10px; }
 .lb-bar button { border: none; padding: 8px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; }
 .lb-bar a { color: #7ab3ff; }
