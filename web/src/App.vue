@@ -2,7 +2,8 @@
 import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { api, type NextImage, type Task, type Stats } from './api';
 
-const tab = ref<'rate' | 'review' | 'tasks' | 'model'>('rate');
+const savedTab = localStorage.getItem('ic-tab') as 'rate' | 'review' | 'tasks' | 'model' | null;
+const tab = ref<'rate' | 'review' | 'tasks' | 'model'>(savedTab ?? 'rate'); // 刷新后回到原页面
 
 // ---- 打分 ----
 const mode = ref<'smart' | 'sequential'>('smart');
@@ -46,6 +47,7 @@ const newTask = ref({ source: 'yandere', tags: '', limit: 100, proxy: '' });
 async function refreshTasks() { tasks.value = await api.tasks(); }
 let taskTimer: number | undefined;
 watch(tab, (t) => {
+  localStorage.setItem('ic-tab', t);
   window.clearInterval(taskTimer);
   if (t === 'tasks') { refreshTasks(); taskTimer = window.setInterval(refreshTasks, 2000); } // 自动拉取进度
   if (t === 'rate') loadNext(); // 回到打分页：按最新预测分重新取第一张
