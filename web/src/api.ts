@@ -33,5 +33,6 @@ export const api = {
   preferences: () => req<{ trained: boolean; version?: number; samples?: number; positive?: [string, number][]; negative?: [string, number][] }>('/api/preferences'),
   album: () => req<(NextImage & { parent_id: number | null; labeled_at: string | null })[]>('/api/album'),
   backfillParents: () => req('/api/backfill-parents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+  backfillStatus: () => req<{ running: boolean; done: number; total: number }>('/api/backfill-status'),
   list: (params: string) => req<{ total: number; page: number; size: number; rows: (NextImage & { user_label: string | null })[] }>(`/api/images?${params}`),
 };

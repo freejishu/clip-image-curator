@@ -104,14 +104,17 @@ export function imageRoutes(app: FastifyInstance) {
   });
 
   // 回填 parent_id（老数据没有）：逐张查 post.json?tags=id:xxx，限速
-  let backfilling = false;
+  const backfillState = { running: false, done: 0, total: 0 };
+  app.get('/api/backfill-status', async () => backfillState);
   app.post('/api/backfill-parents', async (_req, reply) => {
-    if (backfilling) return reply.code(409).send({ error: '回填进行中' });
-    backfilling = true;
+    if (backfillState.running) return reply.code(409).send({ error: '回填进行中' });
+    backfillState.running = true;
     void (async () => {
       try {
         const rows = db.prepare(`SELECT id, source_id FROM images WHERE source = 'yandere' AND parent_id IS NULL`).all() as { id: number; source_id: string }[];
         const { yandere } = await import('../sources/yandere.js');
+        backfillState.total = rows.length;
+        backfillState.done = 0;
         let done = 0;
         for (const row of rows) {
           try {
@@ -121,11 +124,12 @@ export function imageRoutes(app: FastifyInstance) {
             }
           } catch { /* 单张失败跳过 */ }
           done++;
+          backfillState.done = done;
           if (done % 20 === 0) console.log(`parent_id 回填 ${done}/${rows.length}`);
           await new Promise(r => setTimeout(r, 800)); // 礼貌限速
         }
         console.log(`parent_id 回填完成: ${done}/${rows.length}`);
-      } finally { backfilling = false; }
+      } finally { backfillState.running = false; }
     })();
     return { ok: true };
   });

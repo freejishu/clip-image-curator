@@ -79,6 +79,9 @@ type AlbumItem = NextImage & { parent_id: number | null; labeled_at: string | nu
 interface AlbumGroup { key: string; items: AlbumItem[]; hoverIdx: number }
 const albumGroups = ref<AlbumGroup[]>([]);
 const backfilling = ref(false);
+const backfillDone = ref(0);
+const backfillTotal = ref(0);
+let backfillTimer: number | undefined;
 async function refreshAlbum() {
   const rows = await api.album();
   const map = new Map<string, AlbumItem[]>();
@@ -89,14 +92,29 @@ async function refreshAlbum() {
     map.set(key, arr);
   }
   albumGroups.value = [...map.entries()].map(([key, items]) => ({ key, items, hoverIdx: 0 })).sort((a, b) => b.items.length - a.items.length); // 多变体组排前面
+  // 回填若在跑（比如重启前触发的），恢复进度显示
+  const s = await api.backfillStatus();
+  backfillDone.value = s.done; backfillTotal.value = s.total;
+  if (s.running && !backfilling.value) pollBackfill();
 }
 function albumHover(g: AlbumGroup, on: boolean) {
   if (!on) { g.hoverIdx = 0; return; }
   if (g.items.length > 1) g.hoverIdx = (g.hoverIdx + 1) % g.items.length; // 悬浮切换到透视变体
 }
 async function backfill() {
+  await api.backfillParents();
+  pollBackfill();
+}
+function pollBackfill() {
   backfilling.value = true;
-  try { await api.backfillParents(); } finally { backfilling.value = false; }
+  window.clearInterval(backfillTimer);
+  backfillTimer = window.setInterval(async () => {
+    const s = await api.backfillStatus();
+    backfillDone.value = s.done;
+    backfillTotal.value = s.total;
+    backfilling.value = s.running;
+    if (!s.running) { window.clearInterval(backfillTimer); await refreshAlbum(); }
+  }, 2000);
 }
 
 // ---- 统计与模型 ----
@@ -232,7 +250,8 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       <div class="toolbar">
         <span>{{ albumGroups.length }} 组 · {{ albumGroups.reduce((s, g) => s + g.items.length, 0) }} 张喜欢</span>
         <span class="lb-hint">带 ⇄ 角标的组有透视变体，鼠标悬浮查看</span>
-        <button :disabled="backfilling" @click="backfill">{{ backfilling ? '回填中…（约 1 张/秒）' : '回填老数据的透视关系' }}</button>
+        <button :disabled="backfilling" @click="backfill">{{ backfilling ? `回填中 ${backfillDone}/${backfillTotal}` : '回填老数据的透视关系' }}</button>
+        <span v-if="!backfilling && backfillTotal > 0" class="c-ok">✓ 上次回填 {{ backfillTotal }} 张</span>
       </div>
       <div class="grid">
         <figure v-for="g in albumGroups" :key="g.key" class="stack" @mouseenter="albumHover(g, true)" @mouseleave="albumHover(g, false)">
