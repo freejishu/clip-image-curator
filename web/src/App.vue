@@ -2,8 +2,9 @@
 import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { api, type NextImage, type Task, type Stats } from './api';
 
-const savedTab = localStorage.getItem('ic-tab') as 'rate' | 'review' | 'tasks' | 'model' | null;
-const tab = ref<'rate' | 'review' | 'tasks' | 'model'>(savedTab ?? 'rate'); // 刷新后回到原页面
+const savedTab = localStorage.getItem('ic-tab') as Tab | null;
+type Tab = 'rate' | 'review' | 'album' | 'tasks' | 'model';
+const tab = ref<Tab>(savedTab ?? 'rate'); // 刷新后回到原页面
 
 // ---- 打分 ----
 const mode = ref<'smart' | 'sequential'>('smart');
@@ -52,6 +53,7 @@ watch(tab, (t) => {
   if (t === 'tasks') { refreshTasks(); taskTimer = window.setInterval(refreshTasks, 2000); } // 自动拉取进度
   if (t === 'rate') loadNext(); // 回到打分页：按最新预测分重新取第一张
   if (t === 'review') refreshReview();
+  if (t === 'album') refreshAlbum();
   if (t === 'model') refreshModel();
 });
 
@@ -70,6 +72,31 @@ async function createTask() {
   await api.createTask(newTask.value.source, tags, newTask.value.limit, newTask.value.proxy);
   newTask.value.tags = '';
   await refreshTasks();
+}
+
+// ---- 相册 ----
+type AlbumItem = NextImage & { parent_id: number | null; labeled_at: string | null };
+interface AlbumGroup { key: string; items: AlbumItem[]; hoverIdx: number }
+const albumGroups = ref<AlbumGroup[]>([]);
+const backfilling = ref(false);
+async function refreshAlbum() {
+  const rows = await api.album();
+  const map = new Map<string, AlbumItem[]>();
+  for (const r of rows) {
+    const key = r.parent_id && r.parent_id > 0 ? `${r.source}_p${r.parent_id}` : `${r.source}_${r.source_id}`;
+    const arr = map.get(key) ?? [];
+    arr.push(r);
+    map.set(key, arr);
+  }
+  albumGroups.value = [...map.entries()].map(([key, items]) => ({ key, items, hoverIdx: 0 }));
+}
+function albumHover(g: AlbumGroup, on: boolean) {
+  if (!on) { g.hoverIdx = 0; return; }
+  if (g.items.length > 1) g.hoverIdx = (g.hoverIdx + 1) % g.items.length; // 悬浮切换到透视变体
+}
+async function backfill() {
+  backfilling.value = true;
+  try { await api.backfillParents(); } finally { backfilling.value = false; }
 }
 
 // ---- 统计与模型 ----
@@ -123,7 +150,7 @@ onMounted(async () => {
   sources.value = await api.sources();
   await Promise.all([loadNext(), refreshTasks(), refreshModel(), refreshReview()]);
 });
-const lightbox = ref<(NextImage & { user_label: string | null }) | null>(null);
+const lightbox = ref<(NextImage & { user_label?: string | null }) | null>(null);
 onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearInterval(pollTimer); window.clearInterval(taskTimer); });
 </script>
 
@@ -134,6 +161,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       <nav class="menu">
         <button :class="{ on: tab === 'rate' }" @click="tab = 'rate'">🖊️ 打分</button>
         <button :class="{ on: tab === 'review' }" @click="tab = 'review'">🔍 审查修正</button>
+        <button :class="{ on: tab === 'album' }" @click="tab = 'album'">📷 相册</button>
         <button :class="{ on: tab === 'tasks' }" @click="tab = 'tasks'">⬇️ 抓取任务</button>
         <button :class="{ on: tab === 'model' }" @click="tab = 'model'">🧠 模型与偏好</button>
       </nav>
@@ -198,6 +226,22 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <span class="lb-hint">ESC / 点击空白处关闭</span>
       </div>
     </div>
+
+    <!-- 相册 -->
+    <section v-else-if="tab === 'album'">
+      <div class="toolbar">
+        <span>{{ albumGroups.length }} 组 · {{ albumGroups.reduce((s, g) => s + g.items.length, 0) }} 张喜欢</span>
+        <span class="lb-hint">带 ⇄ 角标的组有透视变体，鼠标悬浮查看</span>
+        <button :disabled="backfilling" @click="backfill">{{ backfilling ? '回填中…（约 1 张/秒）' : '回填老数据的透视关系' }}</button>
+      </div>
+      <div class="grid">
+        <figure v-for="g in albumGroups" :key="g.key" class="stack" @mouseenter="albumHover(g, true)" @mouseleave="albumHover(g, false)">
+          <img v-for="(img, i) in g.items" :key="img.id" :src="`/api/images/${img.id}/thumb`" loading="lazy" alt=""
+               :class="{ shown: i === g.hoverIdx }" @click="lightbox = img">
+          <span v-if="g.items.length > 1" class="layers">⇄ {{ g.items.length }}</span>
+        </figure>
+      </div>
+    </section>
 
     <!-- 抓取任务 -->
     <section v-else-if="tab === 'tasks'">
@@ -297,6 +341,10 @@ th, td { border-bottom: 1px solid #2a2d34; padding: 6px 8px; text-align: left; }
 .running { color: #7ab3ff; animation: pulse 1.2s ease-in-out infinite; }
 .c-ok { color: #7ee2a8; }
 @keyframes pulse { 50% { opacity: .45; } }
+figure.stack { position: relative; height: 150px; }
+figure.stack img { position: absolute; inset: 0; opacity: 0; transition: opacity .22s ease; cursor: zoom-in; }
+figure.stack img.shown { opacity: 1; }
+figure.stack .layers { position: absolute; right: 4px; top: 4px; z-index: 2; background: rgba(0,0,0,.65); color: #ffd479; font-size: 11px; padding: 1px 7px; border-radius: 999px; pointer-events: none; }
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
 .lightbox img { max-width: 94vw; max-height: 82vh; border-radius: 8px; }
 .lb-bar { display: flex; gap: 12px; align-items: center; background: #1d2026; padding: 10px 18px; border-radius: 10px; }

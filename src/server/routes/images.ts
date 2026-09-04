@@ -92,6 +92,44 @@ export function imageRoutes(app: FastifyInstance) {
     return { total, page, size, rows: rows.map(r => ({ ...r, tags: JSON.parse(r.tags ?? '[]') })) };
   });
 
+  // 相册：喜欢的图，按标记时间倒序（fallback 入库时间）
+  app.get('/api/album', async () => {
+    const rows = db.prepare(`
+      SELECT id, source, source_id, page_url, tags, pred_score, parent_id, labeled_at, created_at
+      FROM images
+      WHERE user_label = 'like' AND local_path IS NOT NULL
+      ORDER BY labeled_at IS NULL, labeled_at DESC, id DESC
+    `).all() as (Partial<ImageRow> & { parent_id: number | null })[];
+    return rows.map(r => ({ ...r, tags: JSON.parse(r.tags ?? '[]') }));
+  });
+
+  // 回填 parent_id（老数据没有）：逐张查 post.json?tags=id:xxx，限速
+  let backfilling = false;
+  app.post('/api/backfill-parents', async (_req, reply) => {
+    if (backfilling) return reply.code(409).send({ error: '回填进行中' });
+    backfilling = true;
+    void (async () => {
+      try {
+        const rows = db.prepare(`SELECT id, source_id FROM images WHERE source = 'yandere' AND parent_id IS NULL`).all() as { id: number; source_id: string }[];
+        const { yandere } = await import('../sources/yandere.js');
+        let done = 0;
+        for (const row of rows) {
+          try {
+            for await (const batch of yandere.search({ tags: [`id:${row.source_id}`], limit: 1 }, { proxy: config.proxy })) {
+              const m = batch.find(x => x.sourceId === row.source_id);
+              if (m) db.prepare('UPDATE images SET parent_id = ? WHERE id = ?').run(m.parentId ?? -1, row.id); // -1 = 已确认无父
+            }
+          } catch { /* 单张失败跳过 */ }
+          done++;
+          if (done % 20 === 0) console.log(`parent_id 回填 ${done}/${rows.length}`);
+          await new Promise(r => setTimeout(r, 800)); // 礼貌限速
+        }
+        console.log(`parent_id 回填完成: ${done}/${rows.length}`);
+      } finally { backfilling = false; }
+    })();
+    return { ok: true };
+  });
+
   app.get('/api/stats', async () => {
     const one = (sql: string) => (db.prepare(sql).get() as { c: number }).c;
     return {

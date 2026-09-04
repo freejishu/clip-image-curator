@@ -28,6 +28,7 @@ interface YanderePost {
   image_width?: number;
   image_height?: number;
   rating?: string;
+  parent_id?: number | null;
 }
 
 export const yandere: SourcePlugin = {
@@ -62,6 +63,7 @@ export const yandere: SourcePlugin = {
           width: p.image_width,
           height: p.image_height,
           rating: p.rating,
+          parentId: p.parent_id ?? null,
         });
         yielded++;
       }

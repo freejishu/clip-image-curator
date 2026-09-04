@@ -8,6 +8,7 @@
   width?: number;
   height?: number;
   rating?: string;
+  parentId?: number | null;
 }
 
 export interface SearchQuery {

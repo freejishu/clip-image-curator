@@ -23,11 +23,11 @@ function extOf(url: string, buf?: Buffer): string {
 
 function insertImage(meta: ImageMeta): boolean {
   const r = db.prepare(`
-    INSERT OR IGNORE INTO images (source, source_id, page_url, file_url, preview_url, tags, width, height, rating)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO images (source, source_id, page_url, file_url, preview_url, tags, width, height, rating, parent_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     meta.source, meta.sourceId, meta.pageUrl, meta.fileUrl, meta.previewUrl ?? null,
-    JSON.stringify(meta.tags), meta.width ?? null, meta.height ?? null, meta.rating ?? null,
+    JSON.stringify(meta.tags), meta.width ?? null, meta.height ?? null, meta.rating ?? null, meta.parentId ?? null,
   );
   return Number(r.changes) > 0;
 }

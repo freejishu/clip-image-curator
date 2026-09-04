@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 
 // 老库迁移：补 seen 列（已存在则忽略）
 try {
+  db.exec('ALTER TABLE images ADD COLUMN parent_id INTEGER');
+} catch { /* column already exists */ }
+try {
   db.exec('ALTER TABLE tasks ADD COLUMN seen INTEGER NOT NULL DEFAULT 0');
 } catch { /* column already exists */ }
 
