@@ -35,6 +35,8 @@ async function label(label_: string) {
 
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape' && lightbox.value) { lightbox.value = null; return; }
+  if (lightbox.value && e.key === 'ArrowLeft') { lbGo(-1); return; }
+  if (lightbox.value && e.key === 'ArrowRight') { lbGo(1); return; }
   if (tab.value !== 'rate') return;
   if (e.key === '1') label('like');
   else if (e.key === '2') label('dislike');
@@ -177,13 +179,22 @@ onMounted(async () => {
   await Promise.all([loadNext(), refreshTasks(), refreshModel(), refreshReview(), refreshAlbum()]);
 });
 type LbImage = NextImage & { user_label?: string | null; parent_id?: number | null; labeled_at?: string | null };
-interface LightboxState { items: LbImage[]; mainIdx: number; peekIdx: number }
+interface LightboxState { items: LbImage[]; mainIdx: number; peekIdx: number; frames: LbImage[][]; frameIdx: number }
 const lightbox = ref<LightboxState | null>(null);
 const lens = ref({ on: false, x: 0, y: 0 });
 let savedScroll = 0;
 
-function openLightbox(items: LbImage[], mainIdx = 0) {
-  lightbox.value = { items, mainIdx, peekIdx: items.length > 1 ? (mainIdx === 0 ? 1 : 0) : 0 };
+function openLightbox(items: LbImage[], mainIdx = 0, frames?: LbImage[][], frameIdx?: number) {
+  const fr = frames ?? [items];
+  lightbox.value = { items, mainIdx, peekIdx: items.length > 1 ? (mainIdx === 0 ? 1 : 0) : 0, frames: fr, frameIdx: frameIdx ?? 0 };
+  lens.value.on = false;
+}
+function lbGo(delta: number) {
+  const l = lightbox.value;
+  if (!l || l.frames.length <= 1) return;
+  const n = (l.frameIdx + delta + l.frames.length) % l.frames.length;
+  const items = l.frames[n];
+  lightbox.value = { items, mainIdx: 0, peekIdx: items.length > 1 ? 1 : 0, frames: l.frames, frameIdx: n };
   lens.value.on = false;
 }
 function lbMain(): LbImage { const l = lightbox.value!; return l.items[l.mainIdx]; }
@@ -255,8 +266,8 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <button :disabled="reviewPage * REVIEW_SIZE >= reviewTotal" @click="reviewPage++; refreshReview()">下一页</button>
       </div>
       <div class="grid">
-        <figure v-for="img in reviewList" :key="img.id">
-          <img :src="`/api/images/${img.id}/thumb`" loading="lazy" alt="" style="cursor:zoom-in" @click="openLightbox([img])">
+        <figure v-for="(img, ri) in reviewList" :key="img.id">
+          <img :src="`/api/images/${img.id}/thumb`" loading="lazy" alt="" style="cursor:zoom-in" @click="openLightbox([img], 0, reviewList.map(x => [x]), ri)">
           <figcaption>
             <span v-if="img.pred_score != null">{{ img.pred_score.toFixed(2) }}</span>
             <span class="lbl">{{ img.user_label ?? '未标注' }}</span>
@@ -292,7 +303,12 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
           <span class="lb-hint">按住图片移动查看透视</span>
         </template>
         <a :href="lbMain().page_url" target="_blank">原页面 ↗</a>
-        <span class="lb-hint">ESC 关闭</span>
+        <template v-if="lightbox.frames.length > 1">
+          <button class="lb-btn" @click="lbGo(-1)">◀ 上一组</button>
+          <span class="lb-hint">{{ lightbox.frameIdx + 1 }}/{{ lightbox.frames.length }}</span>
+          <button class="lb-btn" @click="lbGo(1)">下一组 ▶</button>
+        </template>
+        <span class="lb-hint">ESC 关闭 · ←/→ 切换</span>
       </div>
     </div>
 
@@ -305,8 +321,8 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <span v-if="!backfilling && backfillTotal > 0" class="c-ok">✓ 上次回填 {{ backfillTotal }} 张</span>
       </div>
       <div class="grid">
-        <figure v-for="g in albumGroups" :key="g.key" class="stack">
-          <img :src="`/api/images/${g.items[0].id}/thumb`" loading="lazy" alt="" class="shown" style="cursor:zoom-in" @click="openLightbox(g.items, 0)">
+        <figure v-for="(g, gi) in albumGroups" :key="g.key" class="stack">
+          <img :src="`/api/images/${g.items[0].id}/thumb`" loading="lazy" alt="" class="shown" style="cursor:zoom-in" @click="openLightbox(g.items, 0, albumGroups.map(x => x.items), gi)">
           <span v-if="g.items.length > 1" class="layers">⇄ {{ g.items.length }}</span>
         </figure>
       </div>
