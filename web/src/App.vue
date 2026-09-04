@@ -105,8 +105,12 @@ const REVIEW_PARAMS: Record<ReviewFilter, string> = {
   predAllDislike: 'maxScore=0.5&sort=asc',
   like: 'label=like',
 };
+const reviewTotal = ref(0);
+const REVIEW_SIZE = 60;
 async function refreshReview() {
-  reviewList.value = await api.list(`${REVIEW_PARAMS[reviewFilter.value]}&page=${reviewPage.value}`);
+  const r = await api.list(`${REVIEW_PARAMS[reviewFilter.value]}&page=${reviewPage.value}`);
+  reviewList.value = r.rows;
+  reviewTotal.value = r.total;
 }
 function setReviewFilter(f: ReviewFilter) { reviewFilter.value = f; reviewPage.value = 1; refreshReview(); }
 async function relabel(id: number, label_: string) {
@@ -167,8 +171,8 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <button :class="{ on: reviewFilter === 'predAllDislike' }" @click="setReviewFilter('predAllDislike')">全盘·预测不喜欢</button>
         <button :class="{ on: reviewFilter === 'like' }" @click="setReviewFilter('like')">已喜欢</button>
         <button :disabled="reviewPage <= 1" @click="if (reviewPage > 1) { reviewPage--; refreshReview(); }">上一页</button>
-        <span>第 {{ reviewPage }} 页</span>
-        <button @click="reviewPage++; refreshReview()">下一页</button>
+        <span>第 {{ reviewPage }} / {{ Math.max(Math.ceil(reviewTotal / REVIEW_SIZE), 1) }} 页 · 共 {{ reviewTotal }} 条</span>
+        <button :disabled="reviewPage * REVIEW_SIZE >= reviewTotal" @click="reviewPage++; refreshReview()">下一页</button>
       </div>
       <div class="grid">
         <figure v-for="img in reviewList" :key="img.id">

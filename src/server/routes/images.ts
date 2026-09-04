@@ -82,13 +82,14 @@ export function imageRoutes(app: FastifyInstance) {
     if (q.label === 'none') { conds.push('user_label IS NULL'); } else if (q.label) { conds.push('user_label = ?'); args.push(q.label); }
     if (q.minScore) { conds.push('pred_score >= ?'); args.push(Number(q.minScore)); }
     if (q.maxScore) { conds.push('pred_score IS NOT NULL AND pred_score <= ?'); args.push(Number(q.maxScore)); }
+    const total = (db.prepare(`SELECT COUNT(*) c FROM images WHERE ${conds.join(' AND ')}`).get(...args) as { c: number }).c;
     const rows = db.prepare(`
       SELECT id, source, source_id, page_url, tags, user_label, pred_score FROM images
       WHERE ${conds.join(' AND ')}
       ORDER BY pred_score IS NULL, pred_score ${q.sort === 'asc' ? 'ASC' : 'DESC'}, id DESC
       LIMIT ? OFFSET ?
     `).all(...args, size, (page - 1) * size) as Partial<ImageRow>[];
-    return rows.map(r => ({ ...r, tags: JSON.parse(r.tags ?? '[]') }));
+    return { total, page, size, rows: rows.map(r => ({ ...r, tags: JSON.parse(r.tags ?? '[]') })) };
   });
 
   app.get('/api/stats', async () => {
