@@ -42,9 +42,15 @@ export async function ensureEmbedding(imageId: number): Promise<Float32Array | n
     { embedding: Buffer | null; local_path: string | null } | undefined;
   if (!row?.local_path) return null;
   if (row.embedding) return new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.length / 4);
-  const vec = await embedImage(row.local_path);
-  db.prepare('UPDATE images SET embedding = ? WHERE id = ?').run(Buffer.from(vec.buffer), imageId);
-  return vec;
+  try {
+    const vec = await embedImage(row.local_path);
+    db.prepare('UPDATE images SET embedding = ? WHERE id = ?').run(Buffer.from(vec.buffer), imageId);
+    return vec;
+  } catch (err) {
+    // 坏图（CMYK/损坏 JPEG 等 libvips 无法解码的）跳过，不拖垮整轮训练
+    console.warn(`[embed] 跳过无法解码的图片 id=${imageId}: ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
 }
 
 export interface TrainResult { version: number; samples: number; likes: number; dislikes: number; scored: number }

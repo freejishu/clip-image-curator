@@ -30,7 +30,10 @@ export async function zeroshotScoreAll(limit = 200, onProgress?: (msg: string) =
   const p = await getPipe();
   let done = 0;
   for (const row of rows) {
-    const out = await p(row.local_path, labels);
+    let out: { score: number; label: string }[];
+    try {
+      out = await p(row.local_path, labels);
+    } catch { continue; } // 坏图跳过
     const pos = out.filter(o => config.zeroshot.positive.includes(o.label));
     const score = pos.length ? Math.max(...pos.map(o => o.score)) : 0;
     db.prepare('UPDATE images SET pred_score = ?, pred_version = 0 WHERE id = ?').run(score, row.id);
