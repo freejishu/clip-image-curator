@@ -5,6 +5,8 @@
 ## 快速开始
 
 ```powershell
+# 日常使用：双击 启动.bat 即可
+# 或手动：
 npm install
 Copy-Item config.example.json config.json   # 按需修改代理等
 npm run dev        # 后端 API http://127.0.0.1:5176
