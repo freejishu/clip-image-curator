@@ -75,7 +75,7 @@ async function createTask() {
 }
 
 // ---- 相册 ----
-type AlbumItem = NextImage & { parent_id: number | null; labeled_at: string | null };
+type AlbumItem = NextImage & { parent_id: number | null; labeled_at: string | null; created_at: string };
 interface AlbumGroup { key: string; items: AlbumItem[]; hoverIdx: number }
 const albumGroups = ref<AlbumGroup[]>([]);
 const backfilling = ref(false);
@@ -91,7 +91,15 @@ async function refreshAlbum() {
     arr.push(r);
     map.set(key, arr);
   }
-  albumGroups.value = [...map.entries()].map(([key, items]) => ({ key, items, hoverIdx: 0 })).sort((a, b) => b.items.length - a.items.length); // 多变体组排前面
+  albumGroups.value = [...map.entries()].map(([key, items]) => {
+    const pid = key.split('_').pop(); // 组的父投稿 id
+    items.sort((a, b) => {
+      const ap = a.source_id === pid ? 0 : 1, bp = b.source_id === pid ? 0 : 1;
+      if (ap !== bp) return ap - bp; // 父投稿作主图
+      return (a.created_at ?? '').localeCompare(b.created_at ?? '');
+    });
+    return { key, items, hoverIdx: 0 };
+  }).sort((a, b) => (b.items[0].created_at ?? '').localeCompare(a.items[0].created_at ?? '')); // 按主图入库时间倒序
   // 回填若在跑（比如重启前触发的），恢复进度显示
   const s = await api.backfillStatus();
   backfillDone.value = s.done; backfillTotal.value = s.total;
@@ -182,8 +190,8 @@ function lbMain(): LbImage { const l = lightbox.value!; return l.items[l.mainIdx
 function lbPeek(): LbImage { const l = lightbox.value!; return l.items[l.peekIdx]; }
 function nextIdx(cur: number, skip: number, n: number): number { let i = cur; do { i = (i + 1) % n; } while (i === skip); return i; }
 function lbSwap() { const l = lightbox.value!; [l.mainIdx, l.peekIdx] = [l.peekIdx, l.mainIdx]; }
-function lbMainNext() { const l = lightbox.value!; l.mainIdx = nextIdx(l.mainIdx, l.peekIdx, l.items.length); lens.value.on = false; }
-function lbPeekNext() { const l = lightbox.value!; l.peekIdx = nextIdx(l.peekIdx, l.mainIdx, l.items.length); }
+function lbPickMain(i: number) { const l = lightbox.value!; l.mainIdx = i; if (l.peekIdx === i) l.peekIdx = nextIdx(i, i, l.items.length); lens.value.on = false; }
+function lbPickPeek(i: number) { const l = lightbox.value!; l.peekIdx = i; if (l.mainIdx === i) l.mainIdx = nextIdx(i, i, l.items.length); }
 function lensMove(e: PointerEvent) {
   const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
   lens.value = { on: true, x: e.clientX - r.left, y: e.clientY - r.top };
@@ -266,18 +274,22 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <img class="lb-main" :src="`/api/images/${lbMain().id}/file`" alt="" draggable="false">
         <img v-if="lightbox.items.length > 1" class="lb-peek" :src="`/api/images/${lbPeek().id}/file`" alt="" draggable="false"
              :style="{ clipPath: lens.on ? `circle(130px at ${lens.x}px ${lens.y}px)` : 'circle(0px at 0px 0px)' }">
+        <div v-if="lightbox.items.length > 1 && lens.on" class="lb-dim"
+             :style="{ WebkitMaskImage: `radial-gradient(circle 130px at ${lens.x}px ${lens.y}px, transparent 96%, black 99%)`, maskImage: `radial-gradient(circle 130px at ${lens.x}px ${lens.y}px, transparent 96%, black 99%)` }"></div>
       </div>
       <div class="lb-bar" @click.stop>
         <span class="pred-badge" :class="predClass(lbMain().pred_score)">{{ predText(lbMain().pred_score) }}</span>
         <button class="like" @click="relabel(lbMain().id, 'like'); lightbox = null">♥ 喜欢</button>
         <button class="dislike" @click="relabel(lbMain().id, 'dislike'); lightbox = null">✕ 不喜欢</button>
         <template v-if="lightbox.items.length > 1">
-          <button class="lb-btn" @click="lbSwap">⇄ 主/里互换</button>
-          <template v-if="lightbox.items.length > 2">
-            <button class="lb-btn" @click="lbMainNext">主图 ▸</button>
-            <button class="lb-btn" @click="lbPeekNext">里图 ▸</button>
-          </template>
-          <span class="lb-hint">{{ lightbox.mainIdx + 1 }}/{{ lightbox.items.length }} · 按住图片移动查看透视</span>
+          <button class="lb-btn" @click="lbSwap">⇄ 互换</button>
+          <span class="lb-pick">主图
+            <button v-for="(it, i) in lightbox.items" :key="'m' + it.id" class="lb-num" :class="{ on: i === lightbox.mainIdx }" @click="lbPickMain(i)">{{ i + 1 }}</button>
+          </span>
+          <span class="lb-pick">里图
+            <button v-for="(it, i) in lightbox.items" :key="'p' + it.id" class="lb-num" :class="{ on: i === lightbox.peekIdx }" @click="lbPickPeek(i)">{{ i + 1 }}</button>
+          </span>
+          <span class="lb-hint">按住图片移动查看透视</span>
         </template>
         <a :href="lbMain().page_url" target="_blank">原页面 ↗</a>
         <span class="lb-hint">ESC 关闭</span>
@@ -407,6 +419,11 @@ figure.stack .layers { position: absolute; right: 4px; top: 4px; z-index: 2; bac
 .lb-main { max-width: 94vw; max-height: 82vh; border-radius: 8px; display: block; }
 .lb-peek { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; border-radius: 8px; transition: clip-path .08s linear; pointer-events: none; }
 .lb-btn { background: #2a2d34; color: #ffd479; border: 1px solid #444; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+.lb-stage { overflow: hidden; border-radius: 8px; }
+.lb-dim { position: absolute; inset: 0; background: rgba(0,0,0,.45); pointer-events: none; border-radius: 8px; }
+.lb-pick { display: inline-flex; align-items: center; gap: 4px; color: #aaa; font-size: 13px; }
+.lb-num { width: 30px; height: 30px; border-radius: 6px; border: 1px solid #444; background: #2a2d34; color: #ccc; cursor: pointer; font-size: 13px; }
+.lb-num.on { background: #ffd479; color: #1a1a1a; font-weight: 700; border-color: #ffd479; }
 /* 移动端适配 */
 @media (max-width: 640px) {
   .app { padding: 8px; }
