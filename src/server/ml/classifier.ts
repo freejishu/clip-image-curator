@@ -124,6 +124,26 @@ function predictWith(model: Model, feat: number[]): number {
   return sigmoid(z);
 }
 
+/** 任务完成后自动给新图/旧模型版本图打分（有模型时） */
+export async function scoreUnscored(onProgress?: (msg: string) => void): Promise<number> {
+  const model = loadModel();
+  if (!model) return 0;
+  const rows = db.prepare(`
+    SELECT id, tags FROM images
+    WHERE local_path IS NOT NULL AND (pred_version IS NULL OR pred_version < ?)
+  `).all(model.version) as { id: number; tags: string }[];
+  let scored = 0;
+  for (const row of rows) {
+    const vec = await ensureEmbedding(row.id);
+    if (!vec) continue;
+    const p = predictWith(model, featurize(vec, JSON.parse(row.tags) as string[], model.vocab, model.dim));
+    db.prepare('UPDATE images SET pred_score = ?, pred_version = ? WHERE id = ?').run(p, model.version, row.id);
+    scored++;
+    if (scored % 20 === 0) onProgress?.(`auto-scoring ${scored}/${rows.length}`);
+  }
+  return scored;
+}
+
 export function loadModel(): Model | null {
   const raw = getMeta('model');
   return raw ? (JSON.parse(raw) as Model) : null;

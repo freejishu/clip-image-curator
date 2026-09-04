@@ -4,6 +4,8 @@ import { db } from '../db.js';
 import { getSource } from '../sources/index.js';
 import type { FetchOpts, ImageMeta } from '../sources/types.js';
 import { storage } from '../storage/backend.js';
+import { loadModel, scoreUnscored } from '../ml/classifier.js';
+import { zeroshotScoreAll } from '../ml/zeroshot.js';
 
 const running = new Map<number, { paused: boolean }>();
 
@@ -77,6 +79,13 @@ export async function startTask(taskId: number): Promise<void> {
     }
     await queue.onIdle();
     touch(`status = '${state.paused ? 'paused' : 'done'}'`);
+    // 新图自动打分：有已训练模型→按模型预测；无模型→zero-shot 粗筛
+    if (!state.paused) {
+      try {
+        const n = loadModel() ? await scoreUnscored() : await zeroshotScoreAll(200);
+        if (n > 0) console.log(`任务 ${taskId} 完成，自动打分 ${n} 张新图`);
+      } catch (e) { console.warn(`任务 ${taskId} 自动打分失败:`, e instanceof Error ? e.message : e); }
+    }
   } catch (err) {
     touch(`status = 'error', error = ?`, err instanceof Error ? err.message : String(err));
   } finally {

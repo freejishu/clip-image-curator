@@ -29,7 +29,7 @@ export const api = {
   stats: () => req<Stats>('/api/stats'),
   train: () => req('/api/train', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
   zeroshot: () => req('/api/zeroshot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
-  trainStatus: () => req<{ status: string; progress: string; result?: unknown; error?: string }>('/api/train/status'),
+  trainStatus: () => req<{ status: string; progress: string; result?: { version?: number; samples?: number; scored?: number }; error?: string }>('/api/train/status'),
   preferences: () => req<{ trained: boolean; version?: number; samples?: number; positive?: [string, number][]; negative?: [string, number][] }>('/api/preferences'),
   list: (params: string) => req<(NextImage & { user_label: string | null })[]>(`/api/images?${params}`),
 };

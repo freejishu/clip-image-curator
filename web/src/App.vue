@@ -32,6 +32,7 @@ async function label(label_: string) {
 }
 
 function onKey(e: KeyboardEvent) {
+  if (e.key === 'Escape' && lightbox.value) { lightbox.value = null; return; }
   if (tab.value !== 'rate') return;
   if (e.key === '1') label('like');
   else if (e.key === '2') label('dislike');
@@ -72,7 +73,7 @@ async function createTask() {
 // ---- 统计与模型 ----
 const stats = ref<Stats | null>(null);
 const prefs = ref<{ trained: boolean; version?: number; samples?: number; positive?: [string, number][]; negative?: [string, number][] } | null>(null);
-const trainState = ref<{ status: string; progress: string; error?: string }>({ status: 'idle', progress: '' });
+const trainState = ref<{ status: string; progress: string; error?: string; result?: { version?: number; samples?: number; scored?: number } }>({ status: 'idle', progress: '' });
 let pollTimer: number | undefined;
 
 async function refreshModel() {
@@ -80,8 +81,8 @@ async function refreshModel() {
   prefs.value = await api.preferences();
   trainState.value = await api.trainStatus();
 }
-async function startTrain() { await api.train(); pollTrain(); }
-async function startZeroshot() { await api.zeroshot(); pollTrain(); }
+async function startTrain() { trainState.value = { status: 'running', progress: '已启动，正在准备…（首次向量化较慢）' }; await api.train(); pollTrain(); }
+async function startZeroshot() { trainState.value = { status: 'running', progress: '已启动，正在加载模型…' }; await api.zeroshot(); pollTrain(); }
 function pollTrain() {
   window.clearInterval(pollTimer);
   pollTimer = window.setInterval(async () => {
@@ -116,6 +117,7 @@ onMounted(async () => {
   sources.value = await api.sources();
   await Promise.all([loadNext(), refreshTasks(), refreshModel(), refreshReview()]);
 });
+const lightbox = ref<(NextImage & { user_label: string | null }) | null>(null);
 onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearInterval(pollTimer); window.clearInterval(taskTimer); });
 </script>
 
@@ -168,7 +170,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       </div>
       <div class="grid">
         <figure v-for="img in reviewList" :key="img.id">
-          <img :src="`/api/images/${img.id}/thumb`" loading="lazy" alt="">
+          <img :src="`/api/images/${img.id}/thumb`" loading="lazy" alt="" style="cursor:zoom-in" @click="lightbox = img">
           <figcaption>
             <span v-if="img.pred_score != null">{{ img.pred_score.toFixed(2) }}</span>
             <span class="lbl">{{ img.user_label ?? '未标注' }}</span>
@@ -178,6 +180,18 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         </figure>
       </div>
     </section>
+
+    <!-- 大图灯箱 -->
+    <div v-if="lightbox" class="lightbox" @click="lightbox = null">
+      <img :src="`/api/images/${lightbox.id}/file`" alt="" @click.stop>
+      <div class="lb-bar" @click.stop>
+        <span class="pred-badge" :class="predClass(lightbox.pred_score)">{{ predText(lightbox.pred_score) }}</span>
+        <button class="like" @click="relabel(lightbox.id, 'like'); lightbox = null">♥ 喜欢</button>
+        <button class="dislike" @click="relabel(lightbox.id, 'dislike'); lightbox = null">✕ 不喜欢</button>
+        <a :href="lightbox.page_url" target="_blank">原页面 ↗</a>
+        <span class="lb-hint">ESC / 点击空白处关闭</span>
+      </div>
+    </div>
 
     <!-- 抓取任务 -->
     <section v-else-if="tab === 'tasks'">
@@ -215,9 +229,9 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       <div class="train-box">
         <button @click="startTrain" :disabled="trainState.status === 'running' || (stats?.liked ?? 0) + (stats?.disliked ?? 0) < 10">训练模型（需 ≥10 条标注）</button>
         <button @click="startZeroshot" :disabled="trainState.status === 'running'">Zero-shot 冷启动粗筛</button>
-        <span v-if="trainState.status === 'running'">⏳ {{ trainState.progress }}</span>
+        <span v-if="trainState.status === 'running'" class="running">⏳ {{ trainState.progress || '进行中…' }}</span>
         <span v-else-if="trainState.status === 'error'" class="c-dislike">✕ {{ trainState.error }}</span>
-        <span v-else-if="trainState.status === 'done'">✓ 完成</span>
+        <span v-else-if="trainState.status === 'done'" class="c-ok">✓ 完成<template v-if="trainState.result?.version">：模型 v{{ trainState.result.version }} · {{ trainState.result.samples }} 样本 · 出分 {{ trainState.result.scored }} 张</template><template v-else-if="trainState.result?.scored != null">：粗筛 {{ trainState.result.scored }} 张</template></span>
       </div>
       <div v-if="prefs?.trained" class="prefs">
         <p>模型 v{{ prefs.version }} · {{ prefs.samples }} 条样本</p>
@@ -274,4 +288,13 @@ th, td { border-bottom: 1px solid #2a2d34; padding: 6px 8px; text-align: left; }
 .train-box { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
 .pref-cols { display: flex; gap: 40px; }
 .pref-cols em { color: #888; font-size: 12px; }
+.running { color: #7ab3ff; animation: pulse 1.2s ease-in-out infinite; }
+.c-ok { color: #7ee2a8; }
+@keyframes pulse { 50% { opacity: .45; } }
+.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+.lightbox img { max-width: 94vw; max-height: 82vh; border-radius: 8px; }
+.lb-bar { display: flex; gap: 12px; align-items: center; background: #1d2026; padding: 10px 18px; border-radius: 10px; }
+.lb-bar button { border: none; padding: 8px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+.lb-bar a { color: #7ab3ff; }
+.lb-hint { color: #666; font-size: 12px; }
 </style>
