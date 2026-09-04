@@ -162,13 +162,13 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <button :class="{ on: reviewFilter === 'predAllLike' }" @click="setReviewFilter('predAllLike')">全盘·预测喜欢</button>
         <button :class="{ on: reviewFilter === 'predAllDislike' }" @click="setReviewFilter('predAllDislike')">全盘·预测不喜欢</button>
         <button :class="{ on: reviewFilter === 'like' }" @click="setReviewFilter('like')">已喜欢</button>
-        <button @click="reviewPage--; refreshReview()">上一页</button>
+        <button :disabled="reviewPage <= 1" @click="if (reviewPage > 1) { reviewPage--; refreshReview(); }">上一页</button>
         <span>第 {{ reviewPage }} 页</span>
         <button @click="reviewPage++; refreshReview()">下一页</button>
       </div>
       <div class="grid">
         <figure v-for="img in reviewList" :key="img.id">
-          <img :src="`/api/images/${img.id}/file`" loading="lazy" alt="">
+          <img :src="`/api/images/${img.id}/thumb`" loading="lazy" alt="">
           <figcaption>
             <span v-if="img.pred_score != null">{{ img.pred_score.toFixed(2) }}</span>
             <span class="lbl">{{ img.user_label ?? '未标注' }}</span>

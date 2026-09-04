@@ -8,11 +8,15 @@
     "incoming": "./data/incoming",
     "favorites": "./data/favorites"
   },
+  "archiveRules": [
+    { "folder": "白裤袜", "tags": ["white_pantyhose", "white_thighhighs"] }
+  ],
   "sources": {
-    "yandere": { "enabled": true, "proxy": null }, "mock": { "enabled": true }
+    "yandere": { "enabled": true, "proxy": null },
+    "mock": { "enabled": true }
   },
   "zeroshot": {
-    "positive": ["anime illustration of a girl wearing white thighhighs", "anime girl wearing white pantyhose tights"],
+    "positive": ["anime girl wearing white pantyhose tights", "anime illustration of a girl wearing white thighhighs"],
     "negative": ["anime illustration without white legwear", "photo"]
   }
 }

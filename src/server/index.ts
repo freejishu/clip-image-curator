@@ -4,11 +4,33 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { config } from './config.js';
 import { db } from './db.js';
+import { resolveArchiveFolder } from './storage/backend.js';
 import { taskRoutes } from './routes/tasks.js';
 import { imageRoutes } from './routes/images.js';
 import { trainRoutes } from './routes/train.js';
 
 const app = Fastify({ logger: true });
+
+// 收藏夹按归档规则重整理（幂等：规则变更/新增后重启即生效）
+{
+  const rows = db.prepare(`SELECT source, source_id, local_path, tags FROM images WHERE user_label = 'like' AND local_path IS NOT NULL`).all() as
+    { source: string; source_id: string; local_path: string; tags: string }[];
+  let moved = 0;
+  for (const row of rows) {
+    const filename = `${row.source}_${row.source_id}${path.extname(row.local_path) || '.jpg'}`;
+    const folder = resolveArchiveFolder(row.tags);
+    const targetDir = folder ? path.join(config.storage.favorites, folder) : config.storage.favorites;
+    const target = path.join(targetDir, filename);
+    if (fs.existsSync(target)) continue;
+    const candidates = [path.join(config.storage.favorites, filename)];
+    for (const sub of fs.readdirSync(config.storage.favorites, { withFileTypes: true })) {
+      if (sub.isDirectory()) candidates.push(path.join(config.storage.favorites, sub.name, filename));
+    }
+    const existing = candidates.find(p => fs.existsSync(p));
+    if (existing) { fs.mkdirSync(targetDir, { recursive: true }); fs.renameSync(existing, target); moved++; }
+  }
+  if (moved) console.log(`收藏夹重整理: 移动 ${moved} 个文件`);
+}
 
 // 进程重启后，上次仍在 running 的任务标记为 paused（可手动「继续」断点续跑）
 const stale = db.prepare(`UPDATE tasks SET status = 'paused' WHERE status = 'running'`).run();

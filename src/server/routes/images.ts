@@ -3,7 +3,8 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db.js';
 import type { ImageRow } from '../db.js';
-import { storage } from '../storage/backend.js';
+import { storage, resolveArchiveFolder } from '../storage/backend.js';
+import { config } from '../config.js';
 
 const MIME: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp' };
 
@@ -27,6 +28,23 @@ export function imageRoutes(app: FastifyInstance) {
     return { done: false, image: { ...row, tags: JSON.parse(row.tags ?? '[]') }, remaining };
   });
 
+  // 缩略图：列表网格专用，320px JPEG，落盘缓存
+  const thumbDir = path.join(config.dataDir, 'thumbs');
+  fs.mkdirSync(thumbDir, { recursive: true });
+  app.get('/api/images/:id/thumb', async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    const row = db.prepare('SELECT local_path FROM images WHERE id = ?').get(id) as { local_path: string | null } | undefined;
+    if (!row?.local_path || !fs.existsSync(row.local_path)) return reply.code(404).send({ error: '文件不存在' });
+    const thumbPath = path.join(thumbDir, `${id}.jpg`);
+    if (!fs.existsSync(thumbPath)) {
+      const sharp = (await import('sharp')).default;
+      await sharp(row.local_path).resize(320, 320, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 70 }).toFile(thumbPath);
+    }
+    reply.header('Content-Type', 'image/jpeg');
+    reply.header('Cache-Control', 'max-age=86400');
+    return reply.send(fs.createReadStream(thumbPath));
+  });
+
   app.get('/api/images/:id/file', async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     const row = db.prepare('SELECT local_path FROM images WHERE id = ?').get(id) as { local_path: string | null } | undefined;
@@ -44,11 +62,12 @@ export function imageRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: '图片不存在' });
 
     const wasLike = row.user_label === 'like';
+    const folder = resolveArchiveFolder(row.tags); // 按 tag 规则分类归档
     db.prepare(`UPDATE images SET user_label = ?, labeled_at = datetime('now') WHERE id = ?`).run(label, id);
     if (label === 'like' && row.local_path) {
-      await storage.archiveFavorite(row.local_path, favName(row));
+      await storage.archiveFavorite(row.local_path, favName(row), folder);
     } else if (wasLike && label !== 'like') {
-      await storage.removeFavorite(favName(row)); // 修正：取消喜欢 → 移出收藏
+      await storage.removeFavorite(favName(row), folder); // 修正：取消喜欢 → 移出收藏
     }
     return { ok: true };
   });

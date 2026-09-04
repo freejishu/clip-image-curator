@@ -9,6 +9,7 @@ export interface AppConfig {
   trainThreshold: number;
   storage: { type: string; incoming: string; favorites: string };
   sources: Record<string, SourceConfig>;
+  archiveRules?: { folder: string; tags: string[] }[];
   zeroshot: { positive: string[]; negative: string[] };
 }
 
