@@ -95,12 +95,25 @@ export function imageRoutes(app: FastifyInstance) {
   // 相册：喜欢的图，按标记时间倒序（fallback 入库时间）
   app.get('/api/album', async () => {
     const rows = db.prepare(`
-      SELECT id, source, source_id, page_url, tags, pred_score, parent_id, labeled_at, created_at
+      SELECT id, source, source_id, page_url, tags, pred_score, parent_id, labeled_at, created_at, embedding
       FROM images
       WHERE user_label = 'like' AND local_path IS NOT NULL
       ORDER BY labeled_at IS NULL, labeled_at DESC, id DESC
     `).all() as (Partial<ImageRow> & { parent_id: number | null })[];
-    return rows.map(r => ({ ...r, tags: JSON.parse(r.tags ?? '[]') }));
+    // 内容近重复合并：同构图但 yande.re 未用 parent_id 关联的帖子，用 CLIP embedding 余弦相似度并查
+    const parentUF = new Map<number, number>();
+    const find = (x: number): number => { let r = x; while (parentUF.get(r) !== r && parentUF.has(r)) r = parentUF.get(r)!; let c = x; while (parentUF.get(c) !== r && parentUF.has(c)) { const n = parentUF.get(c)!; parentUF.set(c, r); c = n; } return r; };
+    const union = (a: number, b: number) => { const ra = find(a), rb = find(b); if (ra !== rb) parentUF.set(ra, rb); };
+    const withEmb = rows.filter(r => r.embedding != null) as (typeof rows[number] & { embedding: Buffer })[];
+    const vecs = withEmb.map(r => new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4));
+    for (let i = 0; i < vecs.length; i++) {
+      for (let j = i + 1; j < vecs.length; j++) {
+        let dot = 0, na = 0, nb = 0;
+        for (let k = 0; k < vecs[i].length; k++) { dot += vecs[i][k] * vecs[j][k]; na += vecs[i][k] ** 2; nb += vecs[j][k] ** 2; }
+        if (dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-9) >= 0.985) union(withEmb[i].id!, withEmb[j].id!);
+      }
+    }
+    return rows.map(r => ({ ...r, tags: JSON.parse(r.tags ?? '[]'), group_id: parentUF.has(r.id!) ? find(r.id!) : null }));
   });
 
   // 回填 parent_id（老数据没有）：逐张查 post.json?tags=id:xxx，限速

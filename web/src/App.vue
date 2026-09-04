@@ -75,7 +75,7 @@ async function createTask() {
 }
 
 // ---- 相册 ----
-type AlbumItem = NextImage & { parent_id: number | null; labeled_at: string | null; created_at: string };
+type AlbumItem = NextImage & { parent_id: number | null; labeled_at: string | null; created_at: string; group_id: number | null };
 interface AlbumGroup { key: string; items: AlbumItem[]; hoverIdx: number }
 const albumGroups = ref<AlbumGroup[]>([]);
 const backfilling = ref(false);
@@ -420,7 +420,7 @@ figure.stack .layers { position: absolute; right: 4px; top: 4px; z-index: 2; bac
 .lb-peek { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; border-radius: 8px; transition: clip-path .08s linear; pointer-events: none; }
 .lb-btn { background: #2a2d34; color: #ffd479; border: 1px solid #444; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; }
 .lb-stage { overflow: hidden; border-radius: 8px; }
-.lb-dim { position: absolute; inset: 0; background: rgba(0,0,0,.45); pointer-events: none; border-radius: 8px; }
+.lb-dim { position: absolute; inset: 0; background: rgba(0,0,0,.25); pointer-events: none; border-radius: 8px; }
 .lb-pick { display: inline-flex; align-items: center; gap: 4px; color: #aaa; font-size: 13px; }
 .lb-num { width: 30px; height: 30px; border-radius: 6px; border: 1px solid #444; background: #2a2d34; color: #ccc; cursor: pointer; font-size: 13px; }
 .lb-num.on { background: #ffd479; color: #1a1a1a; font-weight: 700; border-color: #ffd479; }
