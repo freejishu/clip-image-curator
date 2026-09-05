@@ -6,6 +6,7 @@ import type { ImageRow } from '../db.js';
 import { storage, resolveArchiveFolder } from '../storage/backend.js';
 import { config } from '../config.js';
 import { propagateGroupIds, bindImages, unbindImage, albumGroupKeys, albumGroupMembers, invalidateGroupCache } from '../groups.js';
+import { getSource, sourcesWith } from '../sources/index.js';
 import { extOf } from '../pipeline/crawler.js';
 import type { ImageMeta } from '../sources/types.js';
 
@@ -167,7 +168,7 @@ export function imageRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // 回填 parent_id（老数据没有）：逐张查 post.json?tags=id:xxx，限速
+  // 回填 parent_id（老数据没有）：对支持 fetchPost 能力的源逐张查单帖，限速
   const backfillState = { running: false, done: 0, total: 0 };
   app.get('/api/backfill-status', async () => backfillState);
   app.post('/api/backfill-parents', async (_req, reply) => {
@@ -175,17 +176,17 @@ export function imageRoutes(app: FastifyInstance) {
     backfillState.running = true;
     void (async () => {
       try {
-        const rows = db.prepare(`SELECT id, source_id FROM images WHERE source = 'yandere' AND parent_id IS NULL`).all() as { id: number; source_id: string }[];
-        const { yandere } = await import('../sources/yandere.js');
+        const srcNames = sourcesWith('fetchPost');
+        const rows = (srcNames.length
+          ? db.prepare(`SELECT id, source, source_id FROM images WHERE parent_id IS NULL AND source IN (${srcNames.map(() => '?').join(',')})`).all(...srcNames)
+          : []) as { id: number; source: string; source_id: string }[];
         backfillState.total = rows.length;
         backfillState.done = 0;
         let done = 0;
         for (const row of rows) {
           try {
-            for await (const batch of yandere.search({ tags: [`id:${row.source_id}`], limit: 1 }, { proxy: config.proxy })) {
-              const m = batch.find(x => x.sourceId === row.source_id);
-              if (m) db.prepare('UPDATE images SET parent_id = ? WHERE id = ?').run(m.parentId ?? -1, row.id); // -1 = 已确认无父
-            }
+            const m = await getSource(row.source).fetchPost!(row.source_id, { proxy: config.proxy });
+            if (m) db.prepare('UPDATE images SET parent_id = ? WHERE id = ?').run(m.parentId ?? -1, row.id); // -1 = 已确认无父
           } catch { /* 单张失败跳过 */ }
           done++;
           backfillState.done = done;
@@ -198,47 +199,29 @@ export function imageRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // 补全子投稿：查 yande.re 找该图的父子投稿家族，缺失的下载并整组视为喜欢
+  // 补全家族（父子投稿）：数据源实现 fetchFamily 能力才可用；缺失成员下载并整组视为喜欢
   app.post('/api/images/:id/fetch-siblings', async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     const row = db.prepare('SELECT * FROM images WHERE id = ?').get(id) as ImageRow | undefined;
     if (!row) return reply.code(404).send({ error: '图片不存在' });
-    if (row.source !== 'yandere') return reply.code(400).send({ error: '仅支持 yande.re 来源' });
+    const plugin = getSource(row.source);
+    if (!plugin.fetchFamily) return reply.code(400).send({ error: `数据源 ${row.source} 不支持补全家族` });
 
-    const { yandere } = await import('../sources/yandere.js');
     const opts = { proxy: config.proxy };
-    const searchAll = async (tag: string): Promise<ImageMeta[]> => {
-      const out: ImageMeta[] = [];
-      for await (const batch of yandere.search({ tags: [tag], limit: 100 }, opts)) out.push(...batch);
-      return out;
-    };
-    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-    // 1. 定位家族根：本帖有 parent → 用 parent；否则查自己是否为人父
-    let self: ImageMeta | undefined;
+    let family: ImageMeta[];
     try {
-      self = (await searchAll(`id:${row.source_id}`)).find(m => m.sourceId === row.source_id);
+      family = await plugin.fetchFamily(row.source_id, row.parent_id, opts);
     } catch (e) {
-      return reply.code(502).send({ error: `yande.re 查询失败: ${e instanceof Error ? e.message : String(e)}` });
+      return reply.code(502).send({ error: `${row.source} 查询失败: ${e instanceof Error ? e.message : String(e)}` });
     }
-    await sleep(800); // yande.re 限流
-    const pid = self?.parentId ?? (row.parent_id && row.parent_id > 0 ? row.parent_id : null);
+    // 顺手回填自身 parent_id
+    const self = family.find(m => m.sourceId === row.source_id);
     if (self && row.parent_id == null) {
-      db.prepare('UPDATE images SET parent_id = ? WHERE id = ?').run(self.parentId ?? -1, id); // 顺手回填
+      db.prepare('UPDATE images SET parent_id = ? WHERE id = ?').run(self.parentId ?? -1, id);
     }
-    const rootId = pid ?? Number(row.source_id);
-    const familyMap = new Map<string, ImageMeta>();
-    try {
-      for (const m of await searchAll(`id:${rootId}`)) familyMap.set(m.sourceId, m);
-      await sleep(800);
-      for (const m of await searchAll(`parent:${rootId}`)) familyMap.set(m.sourceId, m);
-    } catch (e) {
-      return reply.code(502).send({ error: `yande.re 查询失败: ${e instanceof Error ? e.message : String(e)}` });
-    }
-    const family = [...familyMap.values()];
     if (family.length <= 1) return { ok: true, family: family.length, added: 0, liked: 0, failed: 0, message: '该投稿没有父子关联的其他投稿' };
 
-    // 2. 逐成员：不在库→入库+下载；在库无文件→补下载；最终整组视为喜欢
+    // 逐成员：不在库→入库+下载；在库无文件→补下载；最终整组视为喜欢
     let added = 0, liked = 0, failed = 0;
     for (const meta of family) {
       try {
@@ -255,7 +238,7 @@ export function imageRoutes(app: FastifyInstance) {
           db.prepare('UPDATE images SET parent_id = ? WHERE id = ?').run(meta.parentId, cur.id); // 回填
         }
         if (!cur.local_path) {
-          const buf = await yandere.fetchImage(meta, opts);
+          const buf = await plugin.fetchImage(meta, opts);
           const localPath = await storage.saveIncoming(buf, `${meta.source}_${meta.sourceId}${extOf(meta.fileUrl, buf)}`);
           db.prepare('UPDATE images SET local_path = ? WHERE id = ?').run(localPath, cur.id);
           cur = { ...cur, local_path: localPath };

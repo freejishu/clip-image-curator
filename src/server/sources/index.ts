@@ -13,6 +13,24 @@ export function getSource(name: string): SourcePlugin {
   return plugin;
 }
 
-export function listSources(): { name: string; enabled: boolean }[] {
-  return Object.keys(registry).map(name => ({ name, enabled: config.sources[name]?.enabled ?? true }));
+export interface SourceInfo {
+  name: string;
+  enabled: boolean;
+  /** 可选能力：parent_id 回填（fetchPost）、补全父子家族（fetchFamily） */
+  caps: { fetchPost: boolean; fetchFamily: boolean };
+}
+
+function capsOf(p: SourcePlugin): SourceInfo['caps'] {
+  return { fetchPost: typeof p.fetchPost === 'function', fetchFamily: typeof p.fetchFamily === 'function' };
+}
+
+export function listSources(): SourceInfo[] {
+  return Object.entries(registry).map(([name, p]) => ({ name, enabled: config.sources[name]?.enabled ?? true, caps: capsOf(p) }));
+}
+
+/** 具备某可选能力的已启用数据源名列表（如 backfill 只处理支持 fetchPost 的源） */
+export function sourcesWith(cap: keyof SourceInfo['caps']): string[] {
+  return Object.entries(registry)
+    .filter(([name, p]) => (config.sources[name]?.enabled ?? true) && capsOf(p)[cap])
+    .map(([name]) => name);
 }

@@ -31,6 +31,23 @@ interface YanderePost {
   parent_id?: number | null;
 }
 
+function toMeta(p: YanderePost): ImageMeta {
+  return {
+    source: 'yandere',
+    sourceId: String(p.id),
+    pageUrl: `https://yande.re/post/show/${p.id}`,
+    fileUrl: p.file_url,
+    previewUrl: p.preview_url,
+    tags: (p.tags ?? '').split(/\s+/).filter(Boolean),
+    width: p.image_width,
+    height: p.image_height,
+    rating: p.rating,
+    parentId: p.parent_id ?? null,
+  };
+}
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
 export const yandere: SourcePlugin = {
   name: 'yandere',
 
@@ -53,25 +70,40 @@ export const yandere: SourcePlugin = {
       for (const p of data) {
         if (yielded >= query.limit) break;
         if (!p.file_url) continue;
-        batch.push({
-          source: 'yandere',
-          sourceId: String(p.id),
-          pageUrl: `https://yande.re/post/show/${p.id}`,
-          fileUrl: p.file_url,
-          previewUrl: p.preview_url,
-          tags: (p.tags ?? '').split(/\s+/).filter(Boolean),
-          width: p.image_width,
-          height: p.image_height,
-          rating: p.rating,
-          parentId: p.parent_id ?? null,
-        });
+        batch.push(toMeta(p));
         yielded++;
       }
       yield batch;
       if (data.length < perPage) return;
       page++;
-      await new Promise(r => setTimeout(r, 1200)); // 礼貌限速
+      await sleep(1200); // 礼貌限速
     }
+  },
+
+  async fetchPost(sourceId: string, opts: FetchOpts): Promise<ImageMeta | null> {
+    const http = client(opts.proxy);
+    const { data } = await http.get<YanderePost[]>('/post.json', { params: { tags: `id:${sourceId}`, limit: 1 } });
+    if (!Array.isArray(data)) return null;
+    const p = data.find(x => String(x.id) === sourceId);
+    return p ? toMeta(p) : null;
+  },
+
+  async fetchFamily(sourceId: string, parentIdHint: number | null, opts: FetchOpts): Promise<ImageMeta[]> {
+    // 1. 定位家族根：自身有 parent 用 parent；fetchPost 查不到时用库内已知 parent_id 兜底
+    const self = await this.fetchPost!(sourceId, opts);
+    await sleep(800); // yande.re 限流
+    const pid = self?.parentId ?? (parentIdHint && parentIdHint > 0 ? parentIdHint : null);
+    const rootId = String(pid ?? sourceId);
+    // 2. 根帖 + 全部子投稿
+    const http = client(opts.proxy);
+    const familyMap = new Map<string, ImageMeta>();
+    if (self) familyMap.set(self.sourceId, self);
+    const root = await this.fetchPost!(rootId, opts);
+    if (root) familyMap.set(root.sourceId, root);
+    await sleep(800);
+    const { data } = await http.get<YanderePost[]>('/post.json', { params: { tags: `parent:${rootId}`, limit: 100 } });
+    if (Array.isArray(data)) for (const p of data) { if (p.file_url) familyMap.set(String(p.id), toMeta(p)); }
+    return [...familyMap.values()];
   },
 
   async fetchImage(meta: ImageMeta, opts: FetchOpts) {

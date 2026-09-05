@@ -22,7 +22,7 @@ export const api = {
   next: (mode: string) => req<{ done: boolean; image?: NextImage; remaining?: number; group?: NextImage[] }>(`/api/images/next?mode=${mode}`),
   label: (id: number, label: string) => req<{ ok: boolean; affected: number[] }>(`/api/images/${id}/label`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }) }),
   tasks: () => req<Task[]>('/api/tasks'),
-  sources: () => req<{ name: string; enabled: boolean }[]>('/api/sources'),
+  sources: () => req<{ name: string; enabled: boolean; caps: { fetchPost: boolean; fetchFamily: boolean } }[]>('/api/sources'),
   createTask: (source: string, tags: string[], limit: number, proxy: string) =>
     req<{ id: number }>('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source, tags, limit, proxy: proxy || null }) }),
   pauseTask: (id: number) => req(`/api/tasks/${id}/pause`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),

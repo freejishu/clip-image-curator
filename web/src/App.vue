@@ -52,7 +52,11 @@ function onKey(e: KeyboardEvent) {
 
 // ---- 任务 ----
 const tasks = ref<Task[]>([]);
-const sources = ref<{ name: string; enabled: boolean }[]>([]);
+const sources = ref<{ name: string; enabled: boolean; caps?: { fetchPost: boolean; fetchFamily: boolean } }[]>([]);
+/** 某数据源的 optional 能力（驱动灯箱按钮显隐，不再硬编码源名） */
+function srcCap(name: string, cap: 'fetchPost' | 'fetchFamily'): boolean {
+  return sources.value.find(s => s.name === name)?.caps?.[cap] ?? false;
+}
 const newTask = ref({ source: 'yandere', tags: '', limit: 100, proxy: '' });
 async function refreshTasks() { tasks.value = await api.tasks(); }
 let taskTimer: number | undefined;
@@ -398,7 +402,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
           <span class="lb-hint">按住图片移动查看透视</span>
         </template>
         <a :href="lbMain().page_url" target="_blank">原页面 ↗</a>
-        <button v-if="lbMain().source === 'yandere'" class="lb-btn" :disabled="siblingState.running" @click="fetchSiblings">{{ siblingState.running ? '补全中…' : '⬇ 补全子投稿' }}</button>
+        <button v-if="srcCap(lbMain().source, 'fetchFamily')" class="lb-btn" :disabled="siblingState.running" @click="fetchSiblings">{{ siblingState.running ? '补全中…' : '⬇ 补全子投稿' }}</button>
         <span v-if="siblingState.msg" class="c-ok">{{ siblingState.msg }}</span>
         <button v-if="lightbox.items.length > 1 && lbMain().is_cover === false" class="lb-btn" @click="setCoverCurrent">★ 设为封面</button>
         <span v-if="coverMsg" class="c-ok">{{ coverMsg }}</span>
