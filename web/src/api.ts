@@ -35,6 +35,7 @@ export const api = {
   album: () => req<(NextImage & { parent_id: number | null; labeled_at: string | null; created_at: string; group_key: string | null; in_manual: boolean })[]>('/api/album'),
   bindGroup: (imageIds: number[]) => req<{ ok: boolean; group_id: number }>('/api/groups/bind', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_ids: imageIds }) }),
   unbindGroup: (imageId: number) => req<{ ok: boolean }>('/api/groups/unbind', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_id: imageId }) }),
+  fetchSiblings: (id: number) => req<{ ok: boolean; family: number; added: number; liked: number; failed: number; message?: string }>(`/api/images/${id}/fetch-siblings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
   backfillParents: () => req('/api/backfill-parents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
   backfillStatus: () => req<{ running: boolean; done: number; total: number }>('/api/backfill-status'),
   cleanupNopath: () => req<{ deleted: number }>('/api/cleanup-nopath', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),

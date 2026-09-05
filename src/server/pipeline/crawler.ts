@@ -9,7 +9,7 @@ import { zeroshotScoreAll } from '../ml/zeroshot.js';
 
 const running = new Map<number, { paused: boolean }>();
 
-function extOf(url: string, buf?: Buffer): string {
+export function extOf(url: string, buf?: Buffer): string {
   if (buf && buf.length > 4) {
     if (buf[0] === 0x42 && buf[1] === 0x4d) return '.bmp';
     if (buf[0] === 0x89 && buf[1] === 0x50) return '.png';

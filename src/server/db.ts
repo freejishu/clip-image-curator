@@ -69,6 +69,7 @@ export interface ImageRow {
   width: number | null; height: number | null; rating: string | null;
   local_path: string | null; embedding: Buffer | null;
   user_label: 'like' | 'dislike' | 'skip' | null;
+  parent_id: number | null;
   pred_score: number | null; pred_version: number | null;
   created_at: string; labeled_at: string | null;
 }

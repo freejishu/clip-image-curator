@@ -154,6 +154,24 @@ async function unbindCurrent() {
   lightbox.value = null;
   await refreshAlbum();
 }
+
+// ---- 补全子投稿 ----
+const siblingState = ref<{ running: boolean; msg: string }>({ running: false, msg: '' });
+async function fetchSiblings() {
+  const img = lbMain();
+  if (siblingState.value.running) return;
+  siblingState.value = { running: true, msg: '查询 yande.re 中…' };
+  try {
+    const r = await api.fetchSiblings(img.id);
+    siblingState.value = {
+      running: false,
+      msg: r.message ?? `家族 ${r.family} 张 · 新增下载 ${r.added} · 标记喜欢 ${r.liked}${r.failed ? ` · 失败 ${r.failed}` : ''}`,
+    };
+    await Promise.all([refreshAlbum(), refreshModel()]);
+  } catch (e) {
+    siblingState.value = { running: false, msg: `✕ ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
 async function backfill() {
   await api.backfillParents();
   pollBackfill();
@@ -371,6 +389,8 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
           <span class="lb-hint">按住图片移动查看透视</span>
         </template>
         <a :href="lbMain().page_url" target="_blank">原页面 ↗</a>
+        <button v-if="lbMain().source === 'yandere'" class="lb-btn" :disabled="siblingState.running" @click="fetchSiblings">{{ siblingState.running ? '补全中…' : '⬇ 补全子投稿' }}</button>
+        <span v-if="siblingState.msg" class="c-ok">{{ siblingState.msg }}</span>
         <button v-if="lbMain().in_manual" class="lb-btn" @click="unbindCurrent">解除手动绑定</button>
         <template v-if="lightbox.frames.length > 1">
           <button class="lb-btn" @click="lbGo(-1)">◀ 上一组</button>
