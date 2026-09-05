@@ -12,7 +12,6 @@ const current = ref<NextImage | null>(null);
 const remaining = ref(0);
 const allDone = ref(false);
 const loading = ref(false);
-let preload: string | null = null;
 
 async function loadNext() {
   loading.value = true;
@@ -22,7 +21,6 @@ async function loadNext() {
     current.value = r.image ?? null;
     currentGroup.value = r.group ?? [];
     remaining.value = r.remaining ?? 0;
-    if (current.value) preload = `/api/images/${current.value.id}/file`;
   } finally { loading.value = false; }
 }
 const currentGroup = ref<NextImage[]>([]); // 当前图的同组成员（不含自身）
@@ -87,7 +85,7 @@ async function createTask() {
 
 // ---- 相册 ----
 type AlbumItem = NextImage & { parent_id: number | null; labeled_at: string | null; created_at: string; group_key: string | null; in_manual: boolean };
-interface AlbumGroup { key: string; items: AlbumItem[]; hoverIdx: number }
+interface AlbumGroup { key: string; items: AlbumItem[] }
 const albumGroups = ref<AlbumGroup[]>([]);
 const backfilling = ref(false);
 const backfillDone = ref(0);
@@ -108,16 +106,12 @@ async function refreshAlbum() {
       if (ap !== bp) return ap - bp; // 父投稿作主图（parent_id>0 的是子图）
       return (a.created_at ?? '').localeCompare(b.created_at ?? '');
     });
-    return { key, items, hoverIdx: 0 };
+    return { key, items };
   }).sort((a, b) => (b.items[0].created_at ?? '').localeCompare(a.items[0].created_at ?? '')); // 按主图入库时间倒序
   // 回填若在跑（比如重启前触发的），恢复进度显示
   const s = await api.backfillStatus();
   backfillDone.value = s.done; backfillTotal.value = s.total;
   if (s.running && !backfilling.value) pollBackfill();
-}
-function albumHover(g: AlbumGroup, on: boolean) {
-  if (!on) { g.hoverIdx = 0; return; }
-  if (g.items.length > 1) g.hoverIdx = (g.hoverIdx + 1) % g.items.length; // 悬浮切换到透视变体
 }
 
 // ---- 手动编组 ----
@@ -405,7 +399,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
     <section v-else-if="tab === 'album'">
       <div class="toolbar">
         <span>{{ albumGroups.length }} 组 · {{ albumGroups.reduce((s, g) => s + g.items.length, 0) }} 张喜欢</span>
-        <span class="lb-hint">带 ⇄ 角标的组有透视变体，鼠标悬浮查看</span>
+        <span class="lb-hint">带 ⇄ 角标的组有多张变体，点击进入灯箱透视查看</span>
         <button :class="{ on: bindMode }" @click="toggleBindMode">{{ bindMode ? '退出编组' : '🔗 编组' }}</button>
         <template v-if="bindMode">
           <span>已选 {{ bindSel.size }} 组</span>

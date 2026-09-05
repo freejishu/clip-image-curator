@@ -32,6 +32,13 @@ function insertImage(meta: ImageMeta): boolean {
   return Number(r.changes) > 0;
 }
 
+/** 已入库但文件缺失（上次暂停/下载失败留下的）→ 本次任务应补下载 */
+function missingFile(meta: ImageMeta): boolean {
+  const r = db.prepare('SELECT local_path FROM images WHERE source = ? AND source_id = ?')
+    .get(meta.source, meta.sourceId) as { local_path: string | null } | undefined;
+  return !!r && r.local_path == null;
+}
+
 export async function startTask(taskId: number): Promise<void> {
   const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as {
     source: string; query: string; proxy: string | null; target: number;
@@ -50,12 +57,13 @@ export async function startTask(taskId: number): Promise<void> {
 
   try {
     for await (const batch of plugin.search({ tags: query.tags, limit: query.limit }, opts)) {
-      if (state.paused) { touch(`status = 'paused'`); return; }
+      if (state.paused) { touch(`status = 'paused', finished_at = datetime('now')`); return; }
       touch('seen = seen + ?', batch.length);
       let added = 0;
       for (const meta of batch) {
-        if (insertImage(meta)) {
-          added++;
+        const inserted = insertImage(meta);
+        if (inserted) added++;
+        if (inserted || missingFile(meta)) { // 新图 + 历史缺文件图都补下载
           void queue.add(async () => {
             if (state.paused) return;
             let filename = `${meta.source}_${meta.sourceId}`;
@@ -78,7 +86,7 @@ export async function startTask(taskId: number): Promise<void> {
       touch('fetched = fetched + ?', added);
     }
     await queue.onIdle();
-    touch(`status = '${state.paused ? 'paused' : 'done'}'`);
+    touch(`status = '${state.paused ? 'paused' : 'done'}', finished_at = datetime('now')`);
     // 新图自动打分：有已训练模型→按模型预测；无模型→zero-shot 粗筛
     if (!state.paused) {
       try {
@@ -87,7 +95,7 @@ export async function startTask(taskId: number): Promise<void> {
       } catch (e) { console.warn(`任务 ${taskId} 自动打分失败:`, e instanceof Error ? e.message : e); }
     }
   } catch (err) {
-    touch(`status = 'error', error = ?`, err instanceof Error ? err.message : String(err));
+    touch(`status = 'error', finished_at = datetime('now'), error = ?`, err instanceof Error ? err.message : String(err));
   } finally {
     running.delete(taskId);
   }
@@ -101,6 +109,7 @@ export function pauseTask(taskId: number): boolean {
 }
 
 export function resumeTask(taskId: number): void {
-  db.prepare(`UPDATE tasks SET status = 'running', updated_at = datetime('now') WHERE id = ?`).run(taskId);
+  // finished_at 清空：续跑期间耗时继续累计，到终态再落定
+  db.prepare(`UPDATE tasks SET status = 'running', finished_at = NULL, updated_at = datetime('now') WHERE id = ?`).run(taskId);
   void startTask(taskId);
 }
