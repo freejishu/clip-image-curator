@@ -62,9 +62,9 @@ try {
 } catch { /* column already exists */ }
 try {
   db.exec('ALTER TABLE tasks ADD COLUMN finished_at TEXT');
-  // 历史终态任务：finished_at 用 updated_at 近似回填
-  db.exec(`UPDATE tasks SET finished_at = updated_at WHERE finished_at IS NULL AND status IN ('done','paused','error')`);
 } catch { /* column already exists */ }
+// 兜底（幂等）：任何路径漏写 finished_at 的终态任务，用 updated_at 补上（耗时不再虚增）
+db.exec(`UPDATE tasks SET finished_at = updated_at WHERE finished_at IS NULL AND status IN ('done','paused','error')`);
 
 export interface ImageRow {
   id: number; source: string; source_id: string; page_url: string | null;

@@ -32,8 +32,8 @@ const app = Fastify({ logger: true });
   if (moved) console.log(`收藏夹重整理: 移动 ${moved} 个文件`);
 }
 
-// 进程重启后，上次仍在 running 的任务标记为 paused（可手动「继续」断点续跑）
-const stale = db.prepare(`UPDATE tasks SET status = 'paused' WHERE status = 'running'`).run();
+// 进程重启后，上次仍在 running 的任务标记为 paused（可手动「继续」断点续跑）；落定 finished_at 防止耗时虚增
+const stale = db.prepare(`UPDATE tasks SET status = 'paused', finished_at = datetime('now') WHERE status = 'running'`).run();
 if (stale.changes > 0) console.log(`恢复提示: ${stale.changes} 个中断任务已标记为 paused`);
 
 taskRoutes(app);
