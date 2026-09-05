@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS image_group_members (
   image_id INTEGER NOT NULL UNIQUE,
   PRIMARY KEY(group_id, image_id)
 );
+CREATE TABLE IF NOT EXISTS group_covers (
+  image_id INTEGER PRIMARY KEY  -- 用户手动指定的组封面（跟随图片，组重洗后不丢）
+);
 `);
 
 // 老库迁移：补 seen 列（已存在则忽略）

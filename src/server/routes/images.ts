@@ -5,7 +5,7 @@ import { db } from '../db.js';
 import type { ImageRow } from '../db.js';
 import { storage, resolveArchiveFolder } from '../storage/backend.js';
 import { config } from '../config.js';
-import { propagateGroupIds, bindImages, unbindImage, albumGroupKeys, invalidateGroupCache } from '../groups.js';
+import { propagateGroupIds, bindImages, unbindImage, albumGroupKeys, albumGroupMembers, invalidateGroupCache } from '../groups.js';
 import { extOf } from '../pipeline/crawler.js';
 import type { ImageMeta } from '../sources/types.js';
 
@@ -131,7 +131,21 @@ export function imageRoutes(app: FastifyInstance) {
     // 展示分组：yande.re 父子 ∪ 手动绑定 ∪ CLIP 近重复（groups.ts 统一并查）
     const keys = albumGroupKeys(rows as { id: number; source: string; source_id: string; parent_id: number | null; embedding: Buffer | null }[]);
     const manualIds = new Set((db.prepare('SELECT image_id FROM image_group_members').all() as { image_id: number }[]).map(r => r.image_id));
-    return rows.map(r => ({ ...r, embedding: undefined, tags: JSON.parse(r.tags ?? '[]'), group_key: keys.get(r.id!) ?? null, in_manual: manualIds.has(r.id!) }));
+    const coverIds = new Set((db.prepare('SELECT image_id FROM group_covers').all() as { image_id: number }[]).map(r => r.image_id));
+    return rows.map(r => ({ ...r, embedding: undefined, tags: JSON.parse(r.tags ?? '[]'), group_key: keys.get(r.id!) ?? null, in_manual: manualIds.has(r.id!), is_cover: coverIds.has(r.id!) }));
+  });
+
+  // 手动设置组封面：同组旧封面清除，标记新封面（全站按组展示时以封面为主图）
+  app.post('/api/groups/cover', async (req, reply) => {
+    const { image_id } = req.body as { image_id?: number };
+    if (!image_id) return reply.code(400).send({ error: '需要 image_id' });
+    const row = db.prepare('SELECT id FROM images WHERE id = ?').get(image_id);
+    if (!row) return reply.code(404).send({ error: '图片不存在' });
+    const members = albumGroupMembers(image_id);
+    const ph = members.map(() => '?').join(',');
+    db.prepare(`DELETE FROM group_covers WHERE image_id IN (${ph})`).run(...members);
+    db.prepare('INSERT INTO group_covers (image_id) VALUES (?)').run(image_id);
+    return { ok: true, members };
   });
 
   // 手动绑定组：多图并为一组（已有手动组自动合并）

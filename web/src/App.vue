@@ -84,7 +84,7 @@ async function createTask() {
 }
 
 // ---- 相册 ----
-type AlbumItem = NextImage & { parent_id: number | null; labeled_at: string | null; created_at: string; group_key: string | null; in_manual: boolean };
+type AlbumItem = NextImage & { parent_id: number | null; labeled_at: string | null; created_at: string; group_key: string | null; in_manual: boolean; is_cover: boolean };
 interface AlbumGroup { key: string; items: AlbumItem[] }
 const albumGroups = ref<AlbumGroup[]>([]);
 const backfilling = ref(false);
@@ -102,6 +102,8 @@ async function refreshAlbum() {
   }
   albumGroups.value = [...map.entries()].map(([key, items]) => {
     items.sort((a, b) => {
+      const ac = a.is_cover ? 0 : 1, bc = b.is_cover ? 0 : 1;
+      if (ac !== bc) return ac - bc; // 用户指定封面作主图，优先于父子/入库顺序
       const ap = (a.parent_id ?? -1) > 0 ? 1 : 0, bp = (b.parent_id ?? -1) > 0 ? 1 : 0;
       if (ap !== bp) return ap - bp; // 父投稿作主图（parent_id>0 的是子图）
       return (a.created_at ?? '').localeCompare(b.created_at ?? '');
@@ -146,6 +148,18 @@ async function unbindCurrent() {
   if (!img.in_manual) return;
   await api.unbindGroup(img.id);
   lightbox.value = null;
+  await refreshAlbum();
+}
+
+// ---- 设置组封面 ----
+const coverMsg = ref('');
+async function setCoverCurrent() {
+  const img = lbMain();
+  if (img.is_cover) return;
+  const r = await api.setCover(img.id);
+  for (const it of lightbox.value!.items) it.is_cover = it.id === img.id; // 本地即时反映
+  coverMsg.value = `✓ 已设为组封面（组内 ${r.members.length} 张）`;
+  window.setTimeout(() => { coverMsg.value = ''; }, 2500);
   await refreshAlbum();
 }
 
@@ -256,7 +270,7 @@ onMounted(async () => {
   sources.value = await api.sources();
   await Promise.all([loadNext(), refreshTasks(), refreshModel(), refreshReview(), refreshAlbum()]);
 });
-type LbImage = NextImage & { user_label?: string | null; parent_id?: number | null; labeled_at?: string | null; in_manual?: boolean };
+type LbImage = NextImage & { user_label?: string | null; parent_id?: number | null; labeled_at?: string | null; in_manual?: boolean; is_cover?: boolean };
 interface LightboxState { items: LbImage[]; mainIdx: number; peekIdx: number; frames: LbImage[][]; frameIdx: number }
 const lightbox = ref<LightboxState | null>(null);
 const lens = ref({ on: false, x: 0, y: 0 });
@@ -370,6 +384,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       </div>
       <div class="lb-bar" @click.stop>
         <span class="pred-badge" :class="predClass(lbMain().pred_score)">{{ predText(lbMain().pred_score) }}</span>
+        <span v-if="lbMain().is_cover" style="color:#ffd479;font-size:12px">★ 封面</span>
         <button class="like" @click="relabel(lbMain().id, 'like'); lightbox = null">♥ 喜欢</button>
         <button class="dislike" @click="relabel(lbMain().id, 'dislike'); lightbox = null">✕ 不喜欢</button>
         <template v-if="lightbox.items.length > 1">
@@ -385,6 +400,8 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <a :href="lbMain().page_url" target="_blank">原页面 ↗</a>
         <button v-if="lbMain().source === 'yandere'" class="lb-btn" :disabled="siblingState.running" @click="fetchSiblings">{{ siblingState.running ? '补全中…' : '⬇ 补全子投稿' }}</button>
         <span v-if="siblingState.msg" class="c-ok">{{ siblingState.msg }}</span>
+        <button v-if="lightbox.items.length > 1 && lbMain().is_cover === false" class="lb-btn" @click="setCoverCurrent">★ 设为封面</button>
+        <span v-if="coverMsg" class="c-ok">{{ coverMsg }}</span>
         <button v-if="lbMain().in_manual" class="lb-btn" @click="unbindCurrent">解除手动绑定</button>
         <template v-if="lightbox.frames.length > 1">
           <button class="lb-btn" @click="lbGo(-1)">◀ 上一组</button>

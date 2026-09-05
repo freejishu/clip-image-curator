@@ -133,3 +133,15 @@ export function albumGroupKeys(rows: { id: number; source: string; source_id: st
   for (const r of rows) out.set(r.id, parent.has(r.id) ? `g${find(r.id)}` : `s${r.id}`);
   return out;
 }
+
+/** 某图在相册展示分组（父子 ∪ 手动绑定 ∪ CLIP 近重复）中的全部成员 id（含自身；不在相册返回 [imageId]） */
+export function albumGroupMembers(imageId: number): number[] {
+  const rows = db.prepare(`
+    SELECT id, source, source_id, parent_id, embedding FROM images
+    WHERE user_label = 'like' AND local_path IS NOT NULL
+  `).all() as { id: number; source: string; source_id: string; parent_id: number | null; embedding: Buffer | null }[];
+  const keys = albumGroupKeys(rows);
+  const key = keys.get(imageId);
+  if (key == null) return [imageId];
+  return rows.filter(r => keys.get(r.id) === key).map(r => r.id);
+}
