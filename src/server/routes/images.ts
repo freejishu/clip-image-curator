@@ -26,7 +26,15 @@ export function imageRoutes(app: FastifyInstance) {
     `).get() as Partial<ImageRow> | undefined;
     if (!row) return { done: true };
     const remaining = (db.prepare('SELECT COUNT(*) c FROM images WHERE user_label IS NULL AND local_path IS NOT NULL').get() as { c: number }).c;
-    return { done: false, image: { ...row, tags: JSON.parse(row.tags ?? '[]') }, remaining };
+    // 同组（yande.re 父子 ∪ 手动绑定）成员，供打分页预览
+    const memberIds = propagateGroupIds(row.id!).filter(i => i !== row.id);
+    let group: unknown[] = [];
+    if (memberIds.length > 0) {
+      const ph = memberIds.map(() => '?').join(',');
+      group = (db.prepare(`SELECT id, source, source_id, page_url, tags, pred_score, parent_id FROM images WHERE id IN (${ph}) AND local_path IS NOT NULL`).all(...memberIds) as Partial<ImageRow>[])
+        .map(m => ({ ...m, tags: JSON.parse(m.tags ?? '[]') }));
+    }
+    return { done: false, image: { ...row, tags: JSON.parse(row.tags ?? '[]') }, remaining, group };
   });
 
   // 缩略图：列表网格专用，320px JPEG，落盘缓存

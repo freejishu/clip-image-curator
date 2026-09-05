@@ -19,7 +19,7 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  next: (mode: string) => req<{ done: boolean; image?: NextImage; remaining?: number }>(`/api/images/next?mode=${mode}`),
+  next: (mode: string) => req<{ done: boolean; image?: NextImage; remaining?: number; group?: NextImage[] }>(`/api/images/next?mode=${mode}`),
   label: (id: number, label: string) => req<{ ok: boolean; affected: number[] }>(`/api/images/${id}/label`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }) }),
   tasks: () => req<Task[]>('/api/tasks'),
   sources: () => req<{ name: string; enabled: boolean }[]>('/api/sources'),

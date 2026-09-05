@@ -20,10 +20,12 @@ async function loadNext() {
     const r = await api.next(mode.value);
     allDone.value = r.done;
     current.value = r.image ?? null;
+    currentGroup.value = r.group ?? [];
     remaining.value = r.remaining ?? 0;
     if (current.value) preload = `/api/images/${current.value.id}/file`;
   } finally { loading.value = false; }
 }
+const currentGroup = ref<NextImage[]>([]); // 当前图的同组成员（不含自身）
 
 async function label(label_: string) {
   if (!current.value || loading.value) return;
@@ -300,6 +302,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <label><input type="checkbox" :checked="mode === 'smart'" @change="mode = ($event.target as HTMLInputElement).checked ? 'smart' : 'sequential'; loadNext()"> 智能排序（按预测分）</label>
         <span>待标注: {{ remaining }}</span>
         <span class="pred-badge" :class="predClass(current?.pred_score)">{{ predText(current?.pred_score) }}</span>
+        <button v-if="current && currentGroup.length > 0" class="grp-btn" @click="openLightbox([current, ...currentGroup], 0)">⇄ 同组 {{ currentGroup.length + 1 }} 张，点击查看</button>
         <span v-if="likeToast" class="c-ok">{{ likeToast }}</span>
       </div>
       <div v-if="allDone" class="empty">🎉 全部标注完成</div>
@@ -508,6 +511,7 @@ figure.stack img { position: absolute; inset: 0; opacity: 0; transition: opacity
 figure.stack img.shown { opacity: 1; }
 figure.stack .layers { position: absolute; right: 4px; top: 4px; z-index: 2; background: rgba(0,0,0,.65); color: #ffd479; font-size: 11px; padding: 1px 7px; border-radius: 999px; pointer-events: none; }
 figure.stack.bind-sel { outline: 3px solid #3b82f6; outline-offset: -3px; }
+.grp-btn { background: #2a2d34; color: #ffd479; border: 1px solid #444; padding: 4px 12px; border-radius: 999px; cursor: pointer; font-size: 13px; }
 figure.stack.bind-sel::after { content: '✓'; position: absolute; left: 4px; top: 4px; z-index: 2; background: #3b82f6; color: #fff; font-size: 12px; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
 .lb-stage { position: relative; max-width: 94vw; max-height: 82vh; touch-action: none; user-select: none; }
