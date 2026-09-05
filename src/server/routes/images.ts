@@ -78,15 +78,20 @@ export function imageRoutes(app: FastifyInstance) {
     } else if (wasLike && label !== 'like') {
       await storage.removeFavorite(favName(row), folder); // 修正：取消喜欢 → 移出收藏
     }
-    // 喜欢传播：组内（yande.re 父子 ∪ 手动绑定）未标注成员一并保留
+    // 组传播（yande.re 父子 ∪ 手动绑定）：
+    // like → 组内未标注成员一并保留（尊重显式不喜欢）；dislike → 整组覆盖为不喜欢（含已喜欢的，移出收藏）
     const affected: number[] = [id];
-    if (label === 'like') {
+    if (label === 'like' || label === 'dislike') {
       for (const gid of propagateGroupIds(id)) {
         if (gid === id) continue;
         const m = db.prepare('SELECT * FROM images WHERE id = ?').get(gid) as ImageRow | undefined;
-        if (!m || m.user_label != null || !m.local_path) continue; // 尊重已有标注；无文件跳过
-        db.prepare(`UPDATE images SET user_label = 'like', labeled_at = datetime('now') WHERE id = ?`).run(gid);
-        await storage.archiveFavorite(m.local_path, favName(m), resolveArchiveFolder(m.tags));
+        if (!m || !m.local_path) continue; // 无文件跳过
+        if (m.user_label === label) continue;
+        if (label === 'like' && m.user_label != null) continue;
+        const mWasLike = m.user_label === 'like';
+        db.prepare(`UPDATE images SET user_label = ?, labeled_at = datetime('now') WHERE id = ?`).run(label, gid);
+        if (label === 'like') await storage.archiveFavorite(m.local_path, favName(m), resolveArchiveFolder(m.tags));
+        else if (mWasLike) await storage.removeFavorite(favName(m), resolveArchiveFolder(m.tags));
         affected.push(gid);
       }
     }

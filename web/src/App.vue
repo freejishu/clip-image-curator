@@ -33,8 +33,8 @@ async function label(label_: string) {
   loading.value = true; // 防连击
   try {
     const r = await api.label(id, label_);
-    if (label_ === 'like' && r.affected.length > 1) {
-      likeToast.value = `♥ 已连带保留组内 ${r.affected.length - 1} 张`;
+    if ((label_ === 'like' || label_ === 'dislike') && r.affected.length > 1) {
+      likeToast.value = label_ === 'like' ? `♥ 已连带保留组内 ${r.affected.length - 1} 张` : `✕ 已连带不喜欢组内 ${r.affected.length - 1} 张`;
       window.setTimeout(() => { likeToast.value = ''; }, 2500);
     }
   } finally { loading.value = false; }

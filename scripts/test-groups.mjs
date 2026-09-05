@@ -45,9 +45,16 @@ const album2 = await (await fetch(BASE + '/api/album')).json();
 const ra2 = album2.find(r => r.id === A.id), rb2 = album2.find(r => r.id === B.id);
 check('解绑后拆分为两组', ra2 && rb2 && ra2.group_key !== rb2.group_key);
 
-// 5. 解绑非手动绑定图 → 404
-const unb2 = await post('/api/groups/unbind', { image_id: B.id });
-check('重复解绑返回 404', unb2.status === 404);
+// 5. 重新绑定 + dislike 传播（覆盖已 like 的成员并移出收藏）
+await post('/api/groups/bind', { image_ids: [A.id, B.id] });
+const dis = await post(`/api/images/${A.id}/label`, { label: 'dislike' });
+check(`dislike 传播 affected=${JSON.stringify(dis.body.affected)}`, dis.body.affected?.includes(B.id));
+const bRow2 = db.prepare('SELECT user_label FROM images WHERE id = ?').get(B.id);
+check('B 已被覆盖为不喜欢（原 like 被改写）', bRow2.user_label === 'dislike');
+
+// 6. 解绑 B（A 在上一步仍同组）
+const unb3 = await post('/api/groups/unbind', { image_id: B.id });
+check('再次解绑成功', unb3.status === 200);
 
 // 还原：清标签 + 删收藏副本
 for (const img of [A, B]) {
