@@ -147,6 +147,12 @@ export function imageRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  // 清理"抓到链接但从未下载成功"的脏记录（不影响已标注数据）
+  app.post('/api/cleanup-nopath', async () => {
+    const r = db.prepare('DELETE FROM images WHERE local_path IS NULL AND user_label IS NULL').run();
+    return { deleted: Number(r.changes) };
+  });
+
   app.get('/api/stats', async () => {
     const one = (sql: string) => (db.prepare(sql).get() as { c: number }).c;
     return {

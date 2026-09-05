@@ -5,6 +5,7 @@
 export interface Task {
   id: number; source: string; query: string; status: string;
   fetched: number; downloaded: number; target: number; seen: number; error: string | null; updated_at: string;
+  created_at?: string; finished_at?: string | null;
 }
 export interface Stats {
   total: number; downloaded: number; liked: number; disliked: number;
@@ -34,5 +35,6 @@ export const api = {
   album: () => req<(NextImage & { parent_id: number | null; labeled_at: string | null; created_at: string })[]>('/api/album'),
   backfillParents: () => req('/api/backfill-parents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
   backfillStatus: () => req<{ running: boolean; done: number; total: number }>('/api/backfill-status'),
+  cleanupNopath: () => req<{ deleted: number }>('/api/cleanup-nopath', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
   list: (params: string) => req<{ total: number; page: number; size: number; rows: (NextImage & { user_label: string | null })[] }>(`/api/images?${params}`),
 };

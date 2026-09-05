@@ -127,6 +127,14 @@ function pollBackfill() {
   }, 2000);
 }
 
+// ---- 清理脏数据 ----
+const cleanupMsg = ref('');
+async function cleanupNopath() {
+  const r = await api.cleanupNopath();
+  cleanupMsg.value = `已清理 ${r.deleted} 条「抓到链接但未下载」的记录`;
+  await Promise.all([refreshTasks(), refreshModel()]);
+}
+
 // ---- 统计与模型 ----
 const stats = ref<Stats | null>(null);
 const prefs = ref<{ trained: boolean; version?: number; samples?: number; positive?: [string, number][]; negative?: [string, number][] } | null>(null);
@@ -339,12 +347,16 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <input v-model="newTask.proxy" placeholder="代理（留空用默认）" style="width:200px">
         <button type="submit">开始抓取</button>
       </form>
+      <div class="toolbar" style="margin:8px 0">
+        <button @click="cleanupNopath">🧹 清理「抓到链接但未下载」的记录</button>
+        <span v-if="cleanupMsg" class="c-ok">{{ cleanupMsg }}</span>
+      </div>
       <table>
-        <thead><tr><th>ID</th><th>源</th><th>查询</th><th>状态</th><th>搜到/新增/下载</th><th>错误</th><th>操作</th></tr></thead>
+        <thead><tr><th>ID</th><th>源</th><th>查询</th><th>状态</th><th>搜到/新增/下载</th><th>开始时间</th><th>耗时</th><th>错误</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="t in tasks" :key="t.id">
             <td>{{ t.id }}</td><td>{{ t.source }}</td><td>{{ JSON.parse(t.query).tags.join(' ') }}</td>
-            <td>{{ t.status }}</td><td>搜到 {{ t.seen ?? 0 }} · 新增 {{ t.fetched }} · 下载 {{ t.downloaded }}/{{ t.target }}</td><td>{{ t.error }}</td>
+            <td>{{ t.status }}</td><td>搜到 {{ t.seen ?? 0 }} · 新增 {{ t.fetched }} · 下载 {{ t.downloaded }}/{{ t.target }}</td><td>{{ fmtTime(t.created_at) }}</td><td>{{ fmtDuration(t) }}</td><td>{{ t.error }}</td>
             <td>
               <button v-if="t.status === 'running'" @click="api.pauseTask(t.id).then(refreshTasks)">暂停</button>
               <button v-if="t.status === 'paused' || t.status === 'error'" @click="api.resumeTask(t.id).then(refreshTasks)">继续</button>
