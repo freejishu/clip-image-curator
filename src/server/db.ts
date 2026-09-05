@@ -39,6 +39,15 @@ CREATE TABLE IF NOT EXISTS tasks (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS image_groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS image_group_members (
+  group_id INTEGER NOT NULL,
+  image_id INTEGER NOT NULL UNIQUE,
+  PRIMARY KEY(group_id, image_id)
+);
 `);
 
 // 老库迁移：补 seen 列（已存在则忽略）

@@ -5,6 +5,7 @@ import { db } from '../db.js';
 import type { ImageRow } from '../db.js';
 import { storage, resolveArchiveFolder } from '../storage/backend.js';
 import { config } from '../config.js';
+import { propagateGroupIds, bindImages, unbindImage, albumGroupKeys, invalidateGroupCache } from '../groups.js';
 
 const MIME: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp' };
 
@@ -69,7 +70,19 @@ export function imageRoutes(app: FastifyInstance) {
     } else if (wasLike && label !== 'like') {
       await storage.removeFavorite(favName(row), folder); // 修正：取消喜欢 → 移出收藏
     }
-    return { ok: true };
+    // 喜欢传播：组内（yande.re 父子 ∪ 手动绑定）未标注成员一并保留
+    const affected: number[] = [id];
+    if (label === 'like') {
+      for (const gid of propagateGroupIds(id)) {
+        if (gid === id) continue;
+        const m = db.prepare('SELECT * FROM images WHERE id = ?').get(gid) as ImageRow | undefined;
+        if (!m || m.user_label != null || !m.local_path) continue; // 尊重已有标注；无文件跳过
+        db.prepare(`UPDATE images SET user_label = 'like', labeled_at = datetime('now') WHERE id = ?`).run(gid);
+        await storage.archiveFavorite(m.local_path, favName(m), resolveArchiveFolder(m.tags));
+        affected.push(gid);
+      }
+    }
+    return { ok: true, affected };
   });
 
   // 审查/修正列表
@@ -99,21 +112,30 @@ export function imageRoutes(app: FastifyInstance) {
       FROM images
       WHERE user_label = 'like' AND local_path IS NOT NULL
       ORDER BY labeled_at IS NULL, labeled_at DESC, id DESC
-    `).all() as (Partial<ImageRow> & { parent_id: number | null })[];
-    // 内容近重复合并：同构图但 yande.re 未用 parent_id 关联的帖子，用 CLIP embedding 余弦相似度并查
-    const parentUF = new Map<number, number>();
-    const find = (x: number): number => { let r = x; while (parentUF.get(r) !== r && parentUF.has(r)) r = parentUF.get(r)!; let c = x; while (parentUF.get(c) !== r && parentUF.has(c)) { const n = parentUF.get(c)!; parentUF.set(c, r); c = n; } return r; };
-    const union = (a: number, b: number) => { const ra = find(a), rb = find(b); if (ra !== rb) parentUF.set(ra, rb); };
-    const withEmb = rows.filter(r => r.embedding != null) as (typeof rows[number] & { embedding: Buffer })[];
-    const vecs = withEmb.map(r => new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4));
-    for (let i = 0; i < vecs.length; i++) {
-      for (let j = i + 1; j < vecs.length; j++) {
-        let dot = 0, na = 0, nb = 0;
-        for (let k = 0; k < vecs[i].length; k++) { dot += vecs[i][k] * vecs[j][k]; na += vecs[i][k] ** 2; nb += vecs[j][k] ** 2; }
-        if (dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-9) >= 0.985) union(withEmb[i].id!, withEmb[j].id!);
-      }
-    }
-    return rows.map(r => ({ ...r, tags: JSON.parse(r.tags ?? '[]'), group_id: parentUF.has(r.id!) ? find(r.id!) : null }));
+    `).all() as (Partial<ImageRow> & { parent_id: number | null; embedding: Buffer | null })[];
+    // 展示分组：yande.re 父子 ∪ 手动绑定 ∪ CLIP 近重复（groups.ts 统一并查）
+    const keys = albumGroupKeys(rows as { id: number; source: string; source_id: string; parent_id: number | null; embedding: Buffer | null }[]);
+    const manualIds = new Set((db.prepare('SELECT image_id FROM image_group_members').all() as { image_id: number }[]).map(r => r.image_id));
+    return rows.map(r => ({ ...r, embedding: undefined, tags: JSON.parse(r.tags ?? '[]'), group_key: keys.get(r.id!) ?? null, in_manual: manualIds.has(r.id!) }));
+  });
+
+  // 手动绑定组：多图并为一组（已有手动组自动合并）
+  app.post('/api/groups/bind', async (req, reply) => {
+    const { image_ids } = req.body as { image_ids?: number[] };
+    if (!Array.isArray(image_ids) || image_ids.length < 2) return reply.code(400).send({ error: '至少选择 2 张图片' });
+    const gid = bindImages(image_ids);
+    invalidateGroupCache();
+    return { ok: true, group_id: gid };
+  });
+
+  // 解绑：仅手动绑定关系可解（yande.re 父子关系不可解）
+  app.post('/api/groups/unbind', async (req, reply) => {
+    const { image_id } = req.body as { image_id?: number };
+    if (!image_id) return reply.code(400).send({ error: '需要 image_id' });
+    const ok = unbindImage(image_id);
+    invalidateGroupCache();
+    if (!ok) return reply.code(404).send({ error: '该图没有手动绑定关系' });
+    return { ok: true };
   });
 
   // 回填 parent_id（老数据没有）：逐张查 post.json?tags=id:xxx，限速

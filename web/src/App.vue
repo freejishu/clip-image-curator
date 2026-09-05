@@ -29,9 +29,16 @@ async function label(label_: string) {
   if (!current.value || loading.value) return;
   const id = current.value.id;
   loading.value = true; // 防连击
-  try { await api.label(id, label_); } finally { loading.value = false; }
+  try {
+    const r = await api.label(id, label_);
+    if (label_ === 'like' && r.affected.length > 1) {
+      likeToast.value = `♥ 已连带保留组内 ${r.affected.length - 1} 张`;
+      window.setTimeout(() => { likeToast.value = ''; }, 2500);
+    }
+  } finally { loading.value = false; }
   await loadNext();
 }
+const likeToast = ref('');
 
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape' && lightbox.value) { lightbox.value = null; return; }
@@ -77,7 +84,7 @@ async function createTask() {
 }
 
 // ---- 相册 ----
-type AlbumItem = NextImage & { parent_id: number | null; labeled_at: string | null; created_at: string; group_id: number | null };
+type AlbumItem = NextImage & { parent_id: number | null; labeled_at: string | null; created_at: string; group_key: string | null; in_manual: boolean };
 interface AlbumGroup { key: string; items: AlbumItem[]; hoverIdx: number }
 const albumGroups = ref<AlbumGroup[]>([]);
 const backfilling = ref(false);
@@ -88,16 +95,15 @@ async function refreshAlbum() {
   const rows = await api.album();
   const map = new Map<string, AlbumItem[]>();
   for (const r of rows) {
-    const key = r.parent_id && r.parent_id > 0 ? `${r.source}_p${r.parent_id}` : `${r.source}_${r.source_id}`;
+    const key = r.group_key ?? `s${r.id}`;
     const arr = map.get(key) ?? [];
     arr.push(r);
     map.set(key, arr);
   }
   albumGroups.value = [...map.entries()].map(([key, items]) => {
-    const pid = key.split('_').pop(); // 组的父投稿 id
     items.sort((a, b) => {
-      const ap = a.source_id === pid ? 0 : 1, bp = b.source_id === pid ? 0 : 1;
-      if (ap !== bp) return ap - bp; // 父投稿作主图
+      const ap = (a.parent_id ?? -1) > 0 ? 1 : 0, bp = (b.parent_id ?? -1) > 0 ? 1 : 0;
+      if (ap !== bp) return ap - bp; // 父投稿作主图（parent_id>0 的是子图）
       return (a.created_at ?? '').localeCompare(b.created_at ?? '');
     });
     return { key, items, hoverIdx: 0 };
@@ -110,6 +116,41 @@ async function refreshAlbum() {
 function albumHover(g: AlbumGroup, on: boolean) {
   if (!on) { g.hoverIdx = 0; return; }
   if (g.items.length > 1) g.hoverIdx = (g.hoverIdx + 1) % g.items.length; // 悬浮切换到透视变体
+}
+
+// ---- 手动编组 ----
+const bindMode = ref(false);
+const bindSel = ref<Set<number>>(new Set());
+const bindMsg = ref('');
+function toggleBindMode() {
+  bindMode.value = !bindMode.value;
+  bindSel.value = new Set();
+  bindMsg.value = '';
+}
+function albumCardClick(g: AlbumGroup, gi: number) {
+  if (!bindMode.value) { openLightbox(g.items, 0, albumGroups.value.map(x => x.items), gi); return; }
+  const id = g.items[0].id;
+  const s = new Set(bindSel.value);
+  if (s.has(id)) s.delete(id); else s.add(id);
+  bindSel.value = s;
+}
+async function confirmBind() {
+  if (bindSel.value.size < 2) { bindMsg.value = '至少选 2 组'; return; }
+  // 选中的是卡片主图 id；把整组成员一起绑定
+  const ids: number[] = [];
+  for (const g of albumGroups.value) if (bindSel.value.has(g.items[0].id)) ids.push(...g.items.map(i => i.id));
+  const r = await api.bindGroup(ids);
+  bindMsg.value = `✓ 已绑定为组 #${r.group_id}`;
+  bindMode.value = false;
+  bindSel.value = new Set();
+  await refreshAlbum();
+}
+async function unbindCurrent() {
+  const img = lbMain();
+  if (!img.in_manual) return;
+  await api.unbindGroup(img.id);
+  lightbox.value = null;
+  await refreshAlbum();
 }
 async function backfill() {
   await api.backfillParents();
@@ -201,7 +242,7 @@ onMounted(async () => {
   sources.value = await api.sources();
   await Promise.all([loadNext(), refreshTasks(), refreshModel(), refreshReview(), refreshAlbum()]);
 });
-type LbImage = NextImage & { user_label?: string | null; parent_id?: number | null; labeled_at?: string | null };
+type LbImage = NextImage & { user_label?: string | null; parent_id?: number | null; labeled_at?: string | null; in_manual?: boolean };
 interface LightboxState { items: LbImage[]; mainIdx: number; peekIdx: number; frames: LbImage[][]; frameIdx: number }
 const lightbox = ref<LightboxState | null>(null);
 const lens = ref({ on: false, x: 0, y: 0 });
@@ -259,6 +300,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <label><input type="checkbox" :checked="mode === 'smart'" @change="mode = ($event.target as HTMLInputElement).checked ? 'smart' : 'sequential'; loadNext()"> 智能排序（按预测分）</label>
         <span>待标注: {{ remaining }}</span>
         <span class="pred-badge" :class="predClass(current?.pred_score)">{{ predText(current?.pred_score) }}</span>
+        <span v-if="likeToast" class="c-ok">{{ likeToast }}</span>
       </div>
       <div v-if="allDone" class="empty">🎉 全部标注完成</div>
       <div v-else-if="current" class="stage">
@@ -326,6 +368,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
           <span class="lb-hint">按住图片移动查看透视</span>
         </template>
         <a :href="lbMain().page_url" target="_blank">原页面 ↗</a>
+        <button v-if="lbMain().in_manual" class="lb-btn" @click="unbindCurrent">解除手动绑定</button>
         <template v-if="lightbox.frames.length > 1">
           <button class="lb-btn" @click="lbGo(-1)">◀ 上一组</button>
           <span class="lb-hint">{{ lightbox.frameIdx + 1 }}/{{ lightbox.frames.length }}</span>
@@ -340,12 +383,18 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       <div class="toolbar">
         <span>{{ albumGroups.length }} 组 · {{ albumGroups.reduce((s, g) => s + g.items.length, 0) }} 张喜欢</span>
         <span class="lb-hint">带 ⇄ 角标的组有透视变体，鼠标悬浮查看</span>
+        <button :class="{ on: bindMode }" @click="toggleBindMode">{{ bindMode ? '退出编组' : '🔗 编组' }}</button>
+        <template v-if="bindMode">
+          <span>已选 {{ bindSel.size }} 组</span>
+          <button :disabled="bindSel.size < 2" @click="confirmBind">绑定为一组</button>
+          <span v-if="bindMsg" class="c-ok">{{ bindMsg }}</span>
+        </template>
         <button :disabled="backfilling" @click="backfill">{{ backfilling ? `回填中 ${backfillDone}/${backfillTotal}` : '回填老数据的透视关系' }}</button>
         <span v-if="!backfilling && backfillTotal > 0" class="c-ok">✓ 上次回填 {{ backfillTotal }} 张</span>
       </div>
       <div class="grid">
-        <figure v-for="(g, gi) in albumGroups" :key="g.key" class="stack">
-          <img :src="`/api/images/${g.items[0].id}/thumb`" loading="lazy" alt="" class="shown" style="cursor:zoom-in" @click="openLightbox(g.items, 0, albumGroups.map(x => x.items), gi)">
+        <figure v-for="(g, gi) in albumGroups" :key="g.key" class="stack" :class="{ 'bind-sel': bindMode && bindSel.has(g.items[0].id) }">
+          <img :src="`/api/images/${g.items[0].id}/thumb`" loading="lazy" alt="" class="shown" style="cursor:zoom-in" @click="albumCardClick(g, gi)">
           <span v-if="g.items.length > 1" class="layers">⇄ {{ g.items.length }}</span>
         </figure>
       </div>
@@ -457,6 +506,8 @@ figure.stack { position: relative; height: 150px; }
 figure.stack img { position: absolute; inset: 0; opacity: 0; transition: opacity .22s ease; cursor: zoom-in; }
 figure.stack img.shown { opacity: 1; }
 figure.stack .layers { position: absolute; right: 4px; top: 4px; z-index: 2; background: rgba(0,0,0,.65); color: #ffd479; font-size: 11px; padding: 1px 7px; border-radius: 999px; pointer-events: none; }
+figure.stack.bind-sel { outline: 3px solid #3b82f6; outline-offset: -3px; }
+figure.stack.bind-sel::after { content: '✓'; position: absolute; left: 4px; top: 4px; z-index: 2; background: #3b82f6; color: #fff; font-size: 12px; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
 .lb-stage { position: relative; max-width: 94vw; max-height: 82vh; touch-action: none; user-select: none; }
 .lb-main { max-width: 94vw; max-height: 82vh; border-radius: 8px; display: block; }

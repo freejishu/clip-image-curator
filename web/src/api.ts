@@ -20,7 +20,7 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   next: (mode: string) => req<{ done: boolean; image?: NextImage; remaining?: number }>(`/api/images/next?mode=${mode}`),
-  label: (id: number, label: string) => req(`/api/images/${id}/label`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }) }),
+  label: (id: number, label: string) => req<{ ok: boolean; affected: number[] }>(`/api/images/${id}/label`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }) }),
   tasks: () => req<Task[]>('/api/tasks'),
   sources: () => req<{ name: string; enabled: boolean }[]>('/api/sources'),
   createTask: (source: string, tags: string[], limit: number, proxy: string) =>
@@ -32,7 +32,9 @@ export const api = {
   zeroshot: () => req('/api/zeroshot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
   trainStatus: () => req<{ status: string; progress: string; result?: { version?: number; samples?: number; scored?: number }; error?: string }>('/api/train/status'),
   preferences: () => req<{ trained: boolean; version?: number; samples?: number; positive?: [string, number][]; negative?: [string, number][] }>('/api/preferences'),
-  album: () => req<(NextImage & { parent_id: number | null; labeled_at: string | null; created_at: string })[]>('/api/album'),
+  album: () => req<(NextImage & { parent_id: number | null; labeled_at: string | null; created_at: string; group_key: string | null; in_manual: boolean })[]>('/api/album'),
+  bindGroup: (imageIds: number[]) => req<{ ok: boolean; group_id: number }>('/api/groups/bind', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_ids: imageIds }) }),
+  unbindGroup: (imageId: number) => req<{ ok: boolean }>('/api/groups/unbind', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_id: imageId }) }),
   backfillParents: () => req('/api/backfill-parents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
   backfillStatus: () => req<{ running: boolean; done: number; total: number }>('/api/backfill-status'),
   cleanupNopath: () => req<{ deleted: number }>('/api/cleanup-nopath', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
