@@ -43,7 +43,18 @@ trainRoutes(app);
 // 生产模式：托管前端构建产物
 const webDist = path.resolve(process.cwd(), 'web/dist');
 if (fs.existsSync(webDist)) {
-  await app.register(fastifyStatic, { root: webDist });
+  // index.html 禁止缓存（hash 资源可强缓存，html 必须每次回源取最新引用）
+  app.addHook('onSend', async (req, reply, payload) => {
+    const url = req.url.split('?')[0];
+    if (url === '/' || url.endsWith('.html')) reply.header('Cache-Control', 'no-cache, must-revalidate');
+    return payload;
+  });
+  await app.register(fastifyStatic, { root: webDist, setHeaders: (res: unknown, p: string) => {
+    const r = res as { header?: (k: string, v: string) => void; setHeader?: (k: string, v: string) => void };
+    const set = (k: string, v: string) => { if (r.header) r.header(k, v); else r.setHeader?.(k, v); };
+    if (p.includes(`${path.sep}assets${path.sep}`)) set('Cache-Control', 'public, max-age=31536000, immutable');
+    else set('Cache-Control', 'no-cache, must-revalidate');
+  } });
   app.setNotFoundHandler((req, reply) => {
     if (req.url.startsWith('/api/')) return reply.code(404).send({ error: 'not found' });
     return reply.sendFile('index.html');
