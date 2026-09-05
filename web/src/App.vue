@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { api, type NextImage, type Task, type Stats } from './api';
 
 const savedTab = localStorage.getItem('ic-tab') as Tab | null;
@@ -278,6 +278,13 @@ type LbImage = NextImage & { user_label?: string | null; parent_id?: number | nu
 interface LightboxState { items: LbImage[]; mainIdx: number; peekIdx: number; frames: LbImage[][]; frameIdx: number }
 const lightbox = ref<LightboxState | null>(null);
 const lens = ref({ on: false, x: 0, y: 0 });
+// 透镜圆孔与黑色遮罩同径，大/中/小三档，localStorage 记忆
+const LENS_SIZES = { S: 90, M: 130, L: 190 } as const;
+type LensSize = keyof typeof LENS_SIZES;
+const savedLens = localStorage.getItem('ic-lens-size') as LensSize | null;
+const lensSize = ref<LensSize>(savedLens && savedLens in LENS_SIZES ? savedLens : 'M');
+const lensR = computed(() => LENS_SIZES[lensSize.value]);
+watch(lensSize, v => localStorage.setItem('ic-lens-size', v));
 let savedScroll = 0;
 
 function openLightbox(items: LbImage[], mainIdx = 0, frames?: LbImage[][], frameIdx?: number) {
@@ -382,9 +389,9 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
            @pointermove="lensMove" @pointerdown="lensMove" @pointerup="lensEnd" @pointerleave="lensEnd">
         <img class="lb-main" :src="`/api/images/${lbMain().id}/file`" alt="" draggable="false">
         <img v-if="lightbox.items.length > 1" class="lb-peek" :src="`/api/images/${lbPeek().id}/file`" alt="" draggable="false"
-             :style="{ clipPath: lens.on ? `circle(130px at ${lens.x}px ${lens.y}px)` : 'circle(0px at 0px 0px)' }">
+             :style="{ clipPath: lens.on ? `circle(${lensR}px at ${lens.x}px ${lens.y}px)` : 'circle(0px at 0px 0px)' }">
         <div v-if="lightbox.items.length > 1 && lens.on" class="lb-dim"
-             :style="{ WebkitMaskImage: `radial-gradient(circle 130px at ${lens.x}px ${lens.y}px, transparent 96%, black 99%)`, maskImage: `radial-gradient(circle 130px at ${lens.x}px ${lens.y}px, transparent 96%, black 99%)` }"></div>
+             :style="{ WebkitMaskImage: `radial-gradient(circle ${lensR}px at ${lens.x}px ${lens.y}px, transparent 96%, black 99%)`, maskImage: `radial-gradient(circle ${lensR}px at ${lens.x}px ${lens.y}px, transparent 96%, black 99%)` }"></div>
       </div>
       <div class="lb-bar" @click.stop>
         <span class="pred-badge" :class="predClass(lbMain().pred_score)">{{ predText(lbMain().pred_score) }}</span>
@@ -393,11 +400,16 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <button class="dislike" @click="relabel(lbMain().id, 'dislike'); lightbox = null">✕ 不喜欢</button>
         <template v-if="lightbox.items.length > 1">
           <button class="lb-btn" @click="lbSwap">⇄ 互换</button>
-          <span class="lb-pick">主图
+          <span class="lb-pick"><span class="lb-pick-label">主图</span>
             <button v-for="(it, i) in lightbox.items" :key="'m' + it.id" class="lb-num" :class="{ on: i === lightbox.mainIdx }" @click="lbPickMain(i)">{{ i + 1 }}</button>
           </span>
-          <span class="lb-pick">里图
+          <span class="lb-pick"><span class="lb-pick-label">里图</span>
             <button v-for="(it, i) in lightbox.items" :key="'p' + it.id" class="lb-num" :class="{ on: i === lightbox.peekIdx }" @click="lbPickPeek(i)">{{ i + 1 }}</button>
+          </span>
+          <span class="lb-pick"><span class="lb-pick-label">透镜</span>
+            <button class="lb-num" :class="{ on: lensSize === 'S' }" @click="lensSize = 'S'">小</button>
+            <button class="lb-num" :class="{ on: lensSize === 'M' }" @click="lensSize = 'M'">中</button>
+            <button class="lb-num" :class="{ on: lensSize === 'L' }" @click="lensSize = 'L'">大</button>
           </span>
           <span class="lb-hint">按住图片移动查看透视</span>
         </template>
@@ -409,7 +421,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <button v-if="lbMain().in_manual" class="lb-btn" @click="unbindCurrent">解除手动绑定</button>
         <template v-if="lightbox.frames.length > 1">
           <button class="lb-btn" @click="lbGo(-1)">◀ 上一组</button>
-          <span class="lb-hint">{{ lightbox.frameIdx + 1 }}/{{ lightbox.frames.length }}</span>
+          <span class="lb-frame-no">{{ lightbox.frameIdx + 1 }}/{{ lightbox.frames.length }}</span>
           <button class="lb-btn" @click="lbGo(1)">下一组 ▶</button>
         </template>
         <span class="lb-hint">ESC 关闭 · ←/→ 切换</span>
@@ -582,4 +594,13 @@ figure.stack.bind-sel::after { content: '✓'; position: absolute; left: 4px; to
 .lb-bar button { border: none; padding: 8px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; }
 .lb-bar a { color: #7ab3ff; }
 .lb-hint { color: #666; font-size: 12px; }
+.lb-frame-no { color: #888; font-size: 12px; }
+/* 移动端灯箱工具栏紧凑化：藏提示文字与选择器标签，缩小按钮 */
+@media (max-width: 640px) {
+  .lb-bar { gap: 6px; padding: 6px 10px; }
+  .lb-bar button { padding: 6px 10px; font-size: 13px; }
+  .lb-bar .lb-num { width: 26px; height: 26px; padding: 0; }
+  .lb-bar .lb-hint, .lb-bar .lb-pick-label { display: none; }
+  .lb-bar .pred-badge { padding: 3px 10px; font-size: 12px; }
+}
 </style>
