@@ -278,12 +278,15 @@ type LbImage = NextImage & { user_label?: string | null; parent_id?: number | nu
 interface LightboxState { items: LbImage[]; mainIdx: number; peekIdx: number; frames: LbImage[][]; frameIdx: number }
 const lightbox = ref<LightboxState | null>(null);
 const lens = ref({ on: false, x: 0, y: 0 });
-// 透镜圆孔与黑色遮罩同径，大/中/小三档，localStorage 记忆
+// 透镜圆孔与黑色遮罩同径，大/中/小三档，localStorage 记忆；移动端屏小，整体缩小一档
 const LENS_SIZES = { S: 90, M: 130, L: 190 } as const;
+const LENS_SIZES_MOBILE = { S: 55, M: 85, L: 125 } as const;
 type LensSize = keyof typeof LENS_SIZES;
 const savedLens = localStorage.getItem('ic-lens-size') as LensSize | null;
 const lensSize = ref<LensSize>(savedLens && savedLens in LENS_SIZES ? savedLens : 'M');
-const lensR = computed(() => LENS_SIZES[lensSize.value]);
+const isMobile = ref(window.matchMedia('(max-width: 640px)').matches);
+window.matchMedia('(max-width: 640px)').addEventListener('change', e => { isMobile.value = e.matches; });
+const lensR = computed(() => (isMobile.value ? LENS_SIZES_MOBILE : LENS_SIZES)[lensSize.value]);
 watch(lensSize, v => localStorage.setItem('ic-lens-size', v));
 let savedScroll = 0;
 
