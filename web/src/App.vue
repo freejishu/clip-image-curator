@@ -135,6 +135,21 @@ async function cleanupNopath() {
   await Promise.all([refreshTasks(), refreshModel()]);
 }
 
+// ---- 时间格式化 ----
+function fmtTime(s?: string | null): string {
+  if (!s) return '-';
+  return new Date(s.replace(' ', 'T') + 'Z').toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function fmtDuration(t: Task): string {
+  if (!t.created_at) return '-';
+  const start = new Date(t.created_at.replace(' ', 'T') + 'Z').getTime();
+  const end = t.finished_at ? new Date(t.finished_at.replace(' ', 'T') + 'Z').getTime() : Date.now();
+  let s = Math.max(0, Math.round((end - start) / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  s = s % 60;
+  return (h ? `${h}h` : '') + (m || h ? `${m}m` : '') + `${s}s`;
+}
+
 // ---- 统计与模型 ----
 const stats = ref<Stats | null>(null);
 const prefs = ref<{ trained: boolean; version?: number; samples?: number; positive?: [string, number][]; negative?: [string, number][] } | null>(null);
