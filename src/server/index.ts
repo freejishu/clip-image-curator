@@ -15,6 +15,8 @@ const app = Fastify({ logger: true });
 {
   const rows = db.prepare(`SELECT source, source_id, local_path, tags FROM images WHERE user_label = 'like' AND local_path IS NOT NULL`).all() as
     { source: string; source_id: string; local_path: string; tags: string }[];
+  // 子目录列表只读一次（原来每张喜欢图都 readdir 一次）
+  const favSubdirs = fs.readdirSync(config.storage.favorites, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name);
   let moved = 0;
   for (const row of rows) {
     const filename = `${row.source}_${row.source_id}${path.extname(row.local_path) || '.jpg'}`;
@@ -23,9 +25,7 @@ const app = Fastify({ logger: true });
     const target = path.join(targetDir, filename);
     if (fs.existsSync(target)) continue;
     const candidates = [path.join(config.storage.favorites, filename)];
-    for (const sub of fs.readdirSync(config.storage.favorites, { withFileTypes: true })) {
-      if (sub.isDirectory()) candidates.push(path.join(config.storage.favorites, sub.name, filename));
-    }
+    for (const sub of favSubdirs) candidates.push(path.join(config.storage.favorites, sub, filename));
     const existing = candidates.find(p => fs.existsSync(p));
     if (existing) { fs.mkdirSync(targetDir, { recursive: true }); fs.renameSync(existing, target); moved++; }
   }

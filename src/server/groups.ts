@@ -119,14 +119,16 @@ export function albumGroupKeys(rows: { id: number; source: string; source_id: st
   const byGid = new Map<number, number[]>();
   for (const m of manual) if (inAlbum.has(m.image_id)) { const a = byGid.get(m.group_id) ?? []; a.push(m.image_id); byGid.set(m.group_id, a); }
   for (const members of byGid.values()) for (let i = 1; i < members.length; i++) union(members[0], members[i]);
-  // CLIP 近重复（仅展示层合并）
+  // CLIP 近重复（仅展示层合并）；范数只算一次，内层循环从 3 趟乘加降为 1 趟
   const withEmb = rows.filter(r => r.embedding != null) as (typeof rows[number] & { embedding: Buffer })[];
   const vecs = withEmb.map(r => new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4));
+  const norms = vecs.map(v => { let s = 0; for (let k = 0; k < v.length; k++) s += v[k] * v[k]; return Math.sqrt(s); });
   for (let i = 0; i < vecs.length; i++) {
     for (let j = i + 1; j < vecs.length; j++) {
-      let dot = 0, na = 0, nb = 0;
-      for (let k = 0; k < vecs[i].length; k++) { dot += vecs[i][k] * vecs[j][k]; na += vecs[i][k] ** 2; nb += vecs[j][k] ** 2; }
-      if (dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-9) >= 0.985) union(withEmb[i].id, withEmb[j].id);
+      let dot = 0;
+      const vi = vecs[i], vj = vecs[j];
+      for (let k = 0; k < vi.length; k++) dot += vi[k] * vj[k];
+      if (dot / (norms[i] * norms[j] + 1e-9) >= 0.985) union(withEmb[i].id, withEmb[j].id);
     }
   }
   const out = new Map<number, string>();

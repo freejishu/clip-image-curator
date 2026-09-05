@@ -21,11 +21,16 @@ export function extOf(url: string, buf?: Buffer): string {
   return m ? m[0].toLowerCase() : '.jpg';
 }
 
+// 预编译语句：抓取热循环里每条 meta 都会用到，避免反复 prepare
+const insertStmt = db.prepare(`
+  INSERT OR IGNORE INTO images (source, source_id, page_url, file_url, preview_url, tags, width, height, rating, parent_id)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+const localPathStmt = db.prepare('SELECT local_path FROM images WHERE source = ? AND source_id = ?');
+const setLocalPathStmt = db.prepare('UPDATE images SET local_path = ? WHERE source = ? AND source_id = ?');
+
 function insertImage(meta: ImageMeta): boolean {
-  const r = db.prepare(`
-    INSERT OR IGNORE INTO images (source, source_id, page_url, file_url, preview_url, tags, width, height, rating, parent_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  const r = insertStmt.run(
     meta.source, meta.sourceId, meta.pageUrl, meta.fileUrl, meta.previewUrl ?? null,
     JSON.stringify(meta.tags), meta.width ?? null, meta.height ?? null, meta.rating ?? null, meta.parentId ?? null,
   );
@@ -34,8 +39,7 @@ function insertImage(meta: ImageMeta): boolean {
 
 /** 已入库但文件缺失（上次暂停/下载失败留下的）→ 本次任务应补下载 */
 function missingFile(meta: ImageMeta): boolean {
-  const r = db.prepare('SELECT local_path FROM images WHERE source = ? AND source_id = ?')
-    .get(meta.source, meta.sourceId) as { local_path: string | null } | undefined;
+  const r = localPathStmt.get(meta.source, meta.sourceId) as { local_path: string | null } | undefined;
   return !!r && r.local_path == null;
 }
 
@@ -71,8 +75,7 @@ export async function startTask(taskId: number): Promise<void> {
               try {
                 const buf = await plugin.fetchImage(meta, opts); const file = filename + extOf(meta.fileUrl, buf);
                 const localPath = await storage.saveIncoming(buf, file);
-                db.prepare('UPDATE images SET local_path = ? WHERE source = ? AND source_id = ?')
-                  .run(localPath, meta.source, meta.sourceId);
+                setLocalPathStmt.run(localPath, meta.source, meta.sourceId);
                 touch('downloaded = downloaded + 1');
                 return;
               } catch {
