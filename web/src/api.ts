@@ -41,4 +41,9 @@ export const api = {
   backfillStatus: () => req<{ running: boolean; done: number; total: number }>('/api/backfill-status'),
   cleanupNopath: () => req<{ deleted: number }>('/api/cleanup-nopath', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
   list: (params: string) => req<{ total: number; page: number; size: number; rows: (NextImage & { user_label: string | null })[] }>(`/api/images?${params}`),
+  settings: () => req<{ dataDir: string; incoming: string; favorites: string; thumbs: string; models: string }>('/api/settings'),
+  setDataDir: (p: string) => req<{ mode: 'use-existing' | 'empty'; needRestart?: boolean }>('/api/settings/data-dir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) }),
+  migrateDataDir: (p: string) => req<{ ok: boolean }>('/api/settings/migrate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) }),
+  migrateStatus: () => req<{ running: boolean; phase: string; done: number; total: number; error: string }>('/api/settings/migrate-status'),
+  restart: () => req<{ ok: boolean }>('/api/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
 };

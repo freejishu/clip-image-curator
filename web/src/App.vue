@@ -2,9 +2,11 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { api, type NextImage, type Task, type Stats } from './api';
 
-const savedTab = localStorage.getItem('ic-tab') as Tab | null;
-type Tab = 'rate' | 'review' | 'album' | 'tasks' | 'model';
-const tab = ref<Tab>(savedTab ?? 'rate'); // 刷新后回到原页面
+type Tab = 'rate' | 'review' | 'album' | 'tasks' | 'settings';
+type SettingsTab = 'base' | 'model';
+const savedTabRaw = localStorage.getItem('ic-tab'); // 旧版本有 'model' 页签，并入设置
+const tab = ref<Tab>((savedTabRaw === 'model' ? 'settings' : savedTabRaw ?? 'rate') as Tab); // 刷新后回到原页面
+const settingsTab = ref<SettingsTab>(savedTabRaw === 'model' ? 'model' : 'base');
 
 // ---- 打分 ----
 const mode = ref<'smart' | 'sequential'>('smart');
@@ -79,7 +81,7 @@ watch(tab, (t) => {
   if (t === 'rate') loadNext(); // 回到打分页：按最新预测分重新取第一张
   if (t === 'review') refreshReview();
   if (t === 'album') refreshAlbum();
-  if (t === 'model') refreshModel();
+  if (t === 'settings') { refreshModel(); loadSettings(); }
 });
 
 function predText(s: number | null | undefined): string {
@@ -256,6 +258,63 @@ function pollTrain() {
   }, 1500);
 }
 
+// ---- 设置：数据目录 ----
+interface SettingsInfo { dataDir: string; incoming: string; favorites: string; thumbs: string; models: string }
+const settingsInfo = ref<SettingsInfo | null>(null);
+const newDir = ref('');
+const setMsg = ref('');
+const savingDir = ref(false);
+const needRestart = ref(false);
+const restarting = ref(false);
+const migrating = ref({ running: false, phase: '', done: 0, total: 0, error: '' });
+let migTimer: number | undefined;
+
+async function loadSettings() { settingsInfo.value = await api.settings(); }
+
+async function saveDataDir() {
+  const p = newDir.value.trim();
+  if (!p || savingDir.value) return;
+  savingDir.value = true; setMsg.value = ''; needRestart.value = false;
+  try {
+    const r = await api.setDataDir(p);
+    if (r.mode === 'use-existing') {
+      setMsg.value = '✓ 新路径下已有数据，已切换（不迁移当前数据）';
+      needRestart.value = true;
+    } else if (window.confirm(`新路径下没有数据。\n\n是否把当前数据（数据库 + 图库 + CLIP 模型，体积可能较大）迁移到 ${p}？\n\n旧目录会保留，确认无误后可手动删除。`)) {
+      await api.migrateDataDir(p);
+      pollMigrate();
+    } else {
+      setMsg.value = '已取消，未做任何修改';
+    }
+  } catch (e) { setMsg.value = `✕ ${e instanceof Error ? e.message : String(e)}`; }
+  finally { savingDir.value = false; }
+}
+
+function pollMigrate() {
+  migrating.value = { running: true, phase: 'starting', done: 0, total: 0, error: '' };
+  window.clearInterval(migTimer);
+  migTimer = window.setInterval(async () => {
+    migrating.value = await api.migrateStatus();
+    if (!migrating.value.running) {
+      window.clearInterval(migTimer);
+      if (migrating.value.phase === 'done') { setMsg.value = `✓ 迁移完成（${migrating.value.total} 个文件），重启后使用新目录`; needRestart.value = true; }
+      else if (migrating.value.error) setMsg.value = `✕ 迁移失败: ${migrating.value.error}`;
+    }
+  }, 1000);
+}
+
+async function restartNow() {
+  if (restarting.value) return;
+  restarting.value = true;
+  try { await api.restart(); } catch { /* 老进程随即退出，这次请求失败属正常 */ }
+  const timer = window.setInterval(async () => {
+    try {
+      const r = await fetch('/api/stats');
+      if (r.ok) { window.clearInterval(timer); location.reload(); }
+    } catch { /* 还没起来，继续等 */ }
+  }, 1000);
+}
+
 // ---- 审查/修正 ----
 type ReviewFilter = 'predNewLike' | 'predNewDislike' | 'predAllLike' | 'predAllDislike' | 'like';
 const reviewFilter = ref<ReviewFilter>('predNewLike');
@@ -332,7 +391,7 @@ watch(lightbox, (val) => {
   if (val) { savedScroll = window.scrollY; document.body.style.overflow = 'hidden'; }
   else { document.body.style.overflow = ''; requestAnimationFrame(() => window.scrollTo(0, savedScroll)); }
 });
-onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearInterval(pollTimer); window.clearInterval(taskTimer); });
+onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearInterval(pollTimer); window.clearInterval(taskTimer); window.clearInterval(migTimer); });
 </script>
 
 <template>
@@ -344,7 +403,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <button :class="{ on: tab === 'review' }" @click="tab = 'review'">🔍 审查修正</button>
         <button :class="{ on: tab === 'album' }" @click="tab = 'album'">📷 相册</button>
         <button :class="{ on: tab === 'tasks' }" @click="tab = 'tasks'">⬇️ 抓取任务</button>
-        <button :class="{ on: tab === 'model' }" @click="tab = 'model'">🧠 模型与偏好</button>
+        <button :class="{ on: tab === 'settings' }" @click="tab = 'settings'">⚙️ 设置</button>
       </nav>
     </header>
 
@@ -495,28 +554,58 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       </table>
     </section>
 
-    <!-- 模型与偏好 -->
+    <!-- 设置（基础设置 / 模型与偏好） -->
     <section v-else>
-      <div v-if="stats" class="stats">
-        <span>总数 {{ stats.total }}</span><span>已下载 {{ stats.downloaded }}</span>
-        <span class="c-like">喜欢 {{ stats.liked }}</span><span class="c-dislike">不喜欢 {{ stats.disliked }}</span>
-        <span>跳过 {{ stats.skipped }}</span><span>待标注 {{ stats.unlabeled }}</span><span>已向量化 {{ stats.withEmbedding }}</span>
+      <div class="toolbar">
+        <button :class="{ on: settingsTab === 'base' }" @click="settingsTab = 'base'">基础设置</button>
+        <button :class="{ on: settingsTab === 'model' }" @click="settingsTab = 'model'">模型与偏好</button>
       </div>
-      <div class="train-box">
-        <button @click="startTrain" :disabled="trainState.status === 'running' || (stats?.liked ?? 0) + (stats?.disliked ?? 0) < 10">训练模型（需 ≥10 条标注）</button>
-        <button @click="startZeroshot" :disabled="trainState.status === 'running'">Zero-shot 冷启动粗筛</button>
-        <span v-if="trainState.status === 'running'" class="running">⏳ {{ trainState.progress || '进行中…' }}</span>
-        <span v-else-if="trainState.status === 'error'" class="c-dislike">✕ {{ trainState.error }}</span>
-        <span v-else-if="trainState.status === 'done'" class="c-ok">✓ 完成<template v-if="trainState.result?.version">：模型 v{{ trainState.result.version }} · {{ trainState.result.samples }} 样本 · 出分 {{ trainState.result.scored }} 张</template><template v-else-if="trainState.result?.scored != null">：粗筛 {{ trainState.result.scored }} 张</template></span>
-      </div>
-      <div v-if="prefs?.trained" class="prefs">
-        <p>模型 v{{ prefs.version }} · {{ prefs.samples }} 条样本</p>
-        <div class="pref-cols">
-          <div><h3>喜欢的元素</h3><ol><li v-for="[t, w] in prefs.positive" :key="t">{{ t }} <em>{{ w.toFixed(2) }}</em></li></ol></div>
-          <div><h3>不喜欢的元素</h3><ol><li v-for="[t, w] in prefs.negative" :key="t">{{ t }} <em>{{ w.toFixed(2) }}</em></li></ol></div>
+
+      <!-- 基础设置：数据目录 -->
+      <div v-if="settingsTab === 'base'" class="settings-base">
+        <h3>数据目录</h3>
+        <p class="lb-hint">数据库、抓取图片、收藏归档、缩略图与 CLIP 模型都存放在数据目录下；修改后需重启生效。</p>
+        <div v-if="settingsInfo" class="path-list">
+          <div><span>数据目录</span><code>{{ settingsInfo.dataDir }}</code></div>
+          <div><span>抓取图片</span><code>{{ settingsInfo.incoming }}</code></div>
+          <div><span>收藏归档</span><code>{{ settingsInfo.favorites }}</code></div>
+          <div><span>CLIP 模型</span><code>{{ settingsInfo.models }}</code></div>
         </div>
+        <div class="new-task">
+          <input v-model="newDir" placeholder="新数据目录（绝对路径），如 E:\ic-data">
+          <button :disabled="savingDir || !newDir.trim()" @click="saveDataDir">{{ savingDir ? '检查中…' : '保存' }}</button>
+        </div>
+        <div v-if="migrating.running" class="running">⏳ 迁移中{{ migrating.phase === 'copy' ? `（复制文件 ${migrating.done}/${migrating.total}）` : '…' }}，模型文件较大，请勿关闭页面</div>
+        <span v-if="setMsg" :class="setMsg.startsWith('✕') ? 'c-dislike' : 'c-ok'">{{ setMsg }}</span>
+        <div v-if="needRestart && !restarting" style="margin-top:12px">
+          <button class="restart-btn" @click="restartNow">🔄 立即重启生效</button>
+        </div>
+        <div v-if="restarting" class="running">⏳ 服务重启中，恢复后自动刷新页面…</div>
       </div>
-      <p v-else>尚未训练。先标注一批图片（或先跑 zero-shot 粗筛提高标注效率），然后点"训练模型"。</p>
+
+      <!-- 模型与偏好 -->
+      <template v-else>
+        <div v-if="stats" class="stats">
+          <span>总数 {{ stats.total }}</span><span>已下载 {{ stats.downloaded }}</span>
+          <span class="c-like">喜欢 {{ stats.liked }}</span><span class="c-dislike">不喜欢 {{ stats.disliked }}</span>
+          <span>跳过 {{ stats.skipped }}</span><span>待标注 {{ stats.unlabeled }}</span><span>已向量化 {{ stats.withEmbedding }}</span>
+        </div>
+        <div class="train-box">
+          <button @click="startTrain" :disabled="trainState.status === 'running' || (stats?.liked ?? 0) + (stats?.disliked ?? 0) < 10">训练模型（需 ≥10 条标注）</button>
+          <button @click="startZeroshot" :disabled="trainState.status === 'running'">Zero-shot 冷启动粗筛</button>
+          <span v-if="trainState.status === 'running'" class="running">⏳ {{ trainState.progress || '进行中…' }}</span>
+          <span v-else-if="trainState.status === 'error'" class="c-dislike">✕ {{ trainState.error }}</span>
+          <span v-else-if="trainState.status === 'done'" class="c-ok">✓ 完成<template v-if="trainState.result?.version">：模型 v{{ trainState.result.version }} · {{ trainState.result.samples }} 样本 · 出分 {{ trainState.result.scored }} 张</template><template v-else-if="trainState.result?.scored != null">：粗筛 {{ trainState.result.scored }} 张</template></span>
+        </div>
+        <div v-if="prefs?.trained" class="prefs">
+          <p>模型 v{{ prefs.version }} · {{ prefs.samples }} 条样本</p>
+          <div class="pref-cols">
+            <div><h3>喜欢的元素</h3><ol><li v-for="[t, w] in prefs.positive" :key="t">{{ t }} <em>{{ w.toFixed(2) }}</em></li></ol></div>
+            <div><h3>不喜欢的元素</h3><ol><li v-for="[t, w] in prefs.negative" :key="t">{{ t }} <em>{{ w.toFixed(2) }}</em></li></ol></div>
+          </div>
+        </div>
+        <p v-else>尚未训练。先标注一批图片（或先跑 zero-shot 粗筛提高标注效率），然后点"训练模型"。</p>
+      </template>
     </section>
   </div>
 </template>
@@ -567,6 +656,11 @@ th, td { border-bottom: 1px solid #2a2d34; padding: 6px 8px; text-align: left; }
 .pref-cols em { color: #888; font-size: 12px; }
 .running { color: #7ab3ff; animation: pulse 1.2s ease-in-out infinite; }
 .c-ok { color: #7ee2a8; }
+.settings-base h3 { margin: 4px 0 6px; font-size: 15px; }
+.path-list { margin: 10px 0 14px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.path-list span { display: inline-block; width: 90px; color: #888; }
+.path-list code { color: #7ab3ff; word-break: break-all; }
+.restart-btn { background: #e5484d; border: none; color: #fff; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; }
 @keyframes pulse { 50% { opacity: .45; } }
 figure.stack { position: relative; height: 150px; }
 figure.stack img { position: absolute; inset: 0; opacity: 0; transition: opacity .22s ease; cursor: zoom-in; }

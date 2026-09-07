@@ -8,6 +8,7 @@ import { resolveArchiveFolder } from './storage/backend.js';
 import { taskRoutes } from './routes/tasks.js';
 import { imageRoutes } from './routes/images.js';
 import { trainRoutes } from './routes/train.js';
+import { settingsRoutes } from './routes/settings.js';
 
 const app = Fastify({ logger: true });
 
@@ -39,6 +40,7 @@ if (stale.changes > 0) console.log(`恢复提示: ${stale.changes} 个中断任�
 taskRoutes(app);
 imageRoutes(app);
 trainRoutes(app);
+settingsRoutes(app);
 
 // 生产模式：托管前端构建产物
 const webDist = path.resolve(process.cwd(), 'web/dist');
