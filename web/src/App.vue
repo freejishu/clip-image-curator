@@ -306,7 +306,7 @@ function pollMigrate() {
 async function restartNow() {
   if (restarting.value) return;
   restarting.value = true;
-  try { await api.restart(); } catch { /* 老进程随即退出，这次请求失败属正常 */ }
+  api.restart().catch(() => { /* 进程退出可能截断响应，正常 */ }); // 不回等，直接开始轮询
   const timer = window.setInterval(async () => {
     try {
       const r = await fetch('/api/stats');

@@ -118,7 +118,7 @@ export function settingsRoutes(app: FastifyInstance) {
     const cwd = process.cwd().replace(/'/g, "''");
     const ps = `Start-Sleep -Seconds 2; Start-Process -FilePath cmd.exe -ArgumentList '/c','启动.bat' -WorkingDirectory '${cwd}'`;
     spawn('powershell.exe', ['-NoProfile', '-Command', ps], { detached: true, stdio: 'ignore' }).unref();
-    setTimeout(() => process.exit(0), 300);
+    setTimeout(() => process.exit(0), 1000); // 留足响应发送时间，过快 exit 会把客户端连接掐断
     return { ok: true };
   });
 }
