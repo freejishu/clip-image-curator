@@ -421,6 +421,7 @@ onMounted(async () => {
   window.addEventListener('keydown', onKey);
   sources.value = await api.sources();
   await Promise.all([loadNext(), refreshTasks(), refreshModel(), refreshReview(), refreshAlbum()]);
+  if (tab.value === 'tasks') taskTimer = window.setInterval(refreshTasks, 2000); // 直接落在任务页时 watch 不触发，需手动补开定时器
 });
 type LbImage = NextImage & { user_label?: string | null; parent_id?: number | null; labeled_at?: string | null; in_manual?: boolean; is_cover?: boolean };
 interface LightboxState { items: LbImage[]; mainIdx: number; peekIdx: number; frames: LbImage[][]; frameIdx: number }
