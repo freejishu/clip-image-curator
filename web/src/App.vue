@@ -535,51 +535,6 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       </div>
     </section>
 
-    <!-- 大图灯箱（含透镜透视） -->
-    <div v-if="lightbox" class="lightbox" @click="lightbox = null">
-      <div class="lb-stage" @click.stop
-           @pointermove="lensMove" @pointerdown="lensMove" @pointerup="lensEnd" @pointerleave="lensEnd">
-        <img class="lb-main" :src="`/api/images/${lbMain().id}/file`" alt="" draggable="false">
-        <img v-if="lightbox.items.length > 1" class="lb-peek" :src="`/api/images/${lbPeek().id}/file`" alt="" draggable="false"
-             :style="{ clipPath: lens.on ? `circle(${lensR}px at ${lens.x}px ${lens.y}px)` : 'circle(0px at 0px 0px)' }">
-        <div v-if="lightbox.items.length > 1 && lens.on" class="lb-dim"
-             :style="{ WebkitMaskImage: `radial-gradient(circle ${lensR}px at ${lens.x}px ${lens.y}px, transparent 96%, black 99%)`, maskImage: `radial-gradient(circle ${lensR}px at ${lens.x}px ${lens.y}px, transparent 96%, black 99%)` }"></div>
-      </div>
-      <div class="lb-bar" @click.stop>
-        <span class="pred-badge" :class="predClass(lbMain().pred_score)">{{ predText(lbMain().pred_score) }}</span>
-        <span v-if="lbMain().is_cover" style="color:#ffd479;font-size:12px">★ 封面</span>
-        <button class="like" @click="relabel(lbMain().id, 'like'); lightbox = null">♥ 喜欢</button>
-        <button class="dislike" @click="relabel(lbMain().id, 'dislike'); lightbox = null">✕ 不喜欢</button>
-        <template v-if="lightbox.items.length > 1">
-          <button class="lb-btn" @click="lbSwap">⇄ 互换</button>
-          <span class="lb-pick"><span class="lb-pick-label">主图</span>
-            <button v-for="(it, i) in lightbox.items" :key="'m' + it.id" class="lb-num" :class="{ on: i === lightbox.mainIdx }" @click="lbPickMain(i)">{{ i + 1 }}</button>
-          </span>
-          <span class="lb-pick"><span class="lb-pick-label">里图</span>
-            <button v-for="(it, i) in lightbox.items" :key="'p' + it.id" class="lb-num" :class="{ on: i === lightbox.peekIdx }" @click="lbPickPeek(i)">{{ i + 1 }}</button>
-          </span>
-          <span class="lb-pick"><span class="lb-pick-label">透镜</span>
-            <button class="lb-num" :class="{ on: lensSize === 'S' }" @click="lensSize = 'S'">小</button>
-            <button class="lb-num" :class="{ on: lensSize === 'M' }" @click="lensSize = 'M'">中</button>
-            <button class="lb-num" :class="{ on: lensSize === 'L' }" @click="lensSize = 'L'">大</button>
-          </span>
-          <span class="lb-hint">按住图片移动查看透视</span>
-        </template>
-        <a :href="lbMain().page_url" target="_blank">原页面 ↗</a>
-        <button v-if="srcCap(lbMain().source, 'fetchFamily')" class="lb-btn" :disabled="siblingState.running" @click="fetchSiblings">{{ siblingState.running ? '补全中…' : '⬇ 补全子投稿' }}</button>
-        <span v-if="siblingState.msg" class="c-ok">{{ siblingState.msg }}</span>
-        <button v-if="lightbox.items.length > 1 && lbMain().is_cover === false" class="lb-btn" @click="setCoverCurrent">★ 设为封面</button>
-        <span v-if="coverMsg" class="c-ok">{{ coverMsg }}</span>
-        <button v-if="lbMain().in_manual" class="lb-btn" @click="unbindCurrent">解除手动绑定</button>
-        <template v-if="lightbox.frames.length > 1">
-          <button class="lb-btn" @click="lbGo(-1)">◀ 上一组</button>
-          <span class="lb-frame-no">{{ lightbox.frameIdx + 1 }}/{{ lightbox.frames.length }}</span>
-          <button class="lb-btn" @click="lbGo(1)">下一组 ▶</button>
-        </template>
-        <span class="lb-hint">ESC 关闭 · ←/→ 切换</span>
-      </div>
-    </div>
-
     <!-- 相册 -->
     <section v-else-if="tab === 'album'">
       <div class="toolbar">
@@ -641,7 +596,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
     </section>
 
     <!-- 设置（基础设置 / 模型与偏好 / 存储设置） -->
-    <section v-else>
+    <section v-else-if="tab === 'settings'">
       <div class="toolbar">
         <button :class="{ on: settingsTab === 'base' }" @click="settingsTab = 'base'">基础设置</button>
         <button :class="{ on: settingsTab === 'model' }" @click="settingsTab = 'model'">模型与偏好</button>
@@ -762,6 +717,51 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <span v-if="storeMsg" :class="storeMsg.startsWith('✕') ? 'c-dislike' : 'c-ok'">{{ storeMsg }}</span>
       </div>
     </section>
+
+<!-- 大图灯箱（含透镜透视） -->
+    <div v-if="lightbox" class="lightbox" @click="lightbox = null">
+      <div class="lb-stage" @click.stop
+           @pointermove="lensMove" @pointerdown="lensMove" @pointerup="lensEnd" @pointerleave="lensEnd">
+        <img class="lb-main" :src="`/api/images/${lbMain().id}/file`" alt="" draggable="false">
+        <img v-if="lightbox.items.length > 1" class="lb-peek" :src="`/api/images/${lbPeek().id}/file`" alt="" draggable="false"
+             :style="{ clipPath: lens.on ? `circle(${lensR}px at ${lens.x}px ${lens.y}px)` : 'circle(0px at 0px 0px)' }">
+        <div v-if="lightbox.items.length > 1 && lens.on" class="lb-dim"
+             :style="{ WebkitMaskImage: `radial-gradient(circle ${lensR}px at ${lens.x}px ${lens.y}px, transparent 96%, black 99%)`, maskImage: `radial-gradient(circle ${lensR}px at ${lens.x}px ${lens.y}px, transparent 96%, black 99%)` }"></div>
+      </div>
+      <div class="lb-bar" @click.stop>
+        <span class="pred-badge" :class="predClass(lbMain().pred_score)">{{ predText(lbMain().pred_score) }}</span>
+        <span v-if="lbMain().is_cover" style="color:#ffd479;font-size:12px">★ 封面</span>
+        <button class="like" @click="relabel(lbMain().id, 'like'); lightbox = null">♥ 喜欢</button>
+        <button class="dislike" @click="relabel(lbMain().id, 'dislike'); lightbox = null">✕ 不喜欢</button>
+        <template v-if="lightbox.items.length > 1">
+          <button class="lb-btn" @click="lbSwap">⇄ 互换</button>
+          <span class="lb-pick"><span class="lb-pick-label">主图</span>
+            <button v-for="(it, i) in lightbox.items" :key="'m' + it.id" class="lb-num" :class="{ on: i === lightbox.mainIdx }" @click="lbPickMain(i)">{{ i + 1 }}</button>
+          </span>
+          <span class="lb-pick"><span class="lb-pick-label">里图</span>
+            <button v-for="(it, i) in lightbox.items" :key="'p' + it.id" class="lb-num" :class="{ on: i === lightbox.peekIdx }" @click="lbPickPeek(i)">{{ i + 1 }}</button>
+          </span>
+          <span class="lb-pick"><span class="lb-pick-label">透镜</span>
+            <button class="lb-num" :class="{ on: lensSize === 'S' }" @click="lensSize = 'S'">小</button>
+            <button class="lb-num" :class="{ on: lensSize === 'M' }" @click="lensSize = 'M'">中</button>
+            <button class="lb-num" :class="{ on: lensSize === 'L' }" @click="lensSize = 'L'">大</button>
+          </span>
+          <span class="lb-hint">按住图片移动查看透视</span>
+        </template>
+        <a :href="lbMain().page_url" target="_blank">原页面 ↗</a>
+        <button v-if="srcCap(lbMain().source, 'fetchFamily')" class="lb-btn" :disabled="siblingState.running" @click="fetchSiblings">{{ siblingState.running ? '补全中…' : '⬇ 补全子投稿' }}</button>
+        <span v-if="siblingState.msg" class="c-ok">{{ siblingState.msg }}</span>
+        <button v-if="lightbox.items.length > 1 && lbMain().is_cover === false" class="lb-btn" @click="setCoverCurrent">★ 设为封面</button>
+        <span v-if="coverMsg" class="c-ok">{{ coverMsg }}</span>
+        <button v-if="lbMain().in_manual" class="lb-btn" @click="unbindCurrent">解除手动绑定</button>
+        <template v-if="lightbox.frames.length > 1">
+          <button class="lb-btn" @click="lbGo(-1)">◀ 上一组</button>
+          <span class="lb-frame-no">{{ lightbox.frameIdx + 1 }}/{{ lightbox.frames.length }}</span>
+          <button class="lb-btn" @click="lbGo(1)">下一组 ▶</button>
+        </template>
+        <span class="lb-hint">ESC 关闭 · ←/→ 切换</span>
+      </div>
+    </div>
   </div>
 </template>
 
