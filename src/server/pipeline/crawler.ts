@@ -72,6 +72,7 @@ export async function startTask(taskId: number): Promise<void> {
             if (state.paused) return;
             let filename = `${meta.source}_${meta.sourceId}`;
             for (let attempt = 0; attempt < 3; attempt++) {
+              if (state.paused) return; // 重试中途被暂停也要立即停
               try {
                 const buf = await plugin.fetchImage(meta, opts); const file = filename + extOf(meta.fileUrl, buf);
                 const localPath = await storage.saveIncoming(buf, file);
@@ -106,9 +107,11 @@ export async function startTask(taskId: number): Promise<void> {
 
 export function pauseTask(taskId: number): boolean {
   const state = running.get(taskId);
-  if (!state) return false;
-  state.paused = true;
-  return true;
+  if (state) state.paused = true;
+  // 立即落库：UI 马上翻转为「继续」（后台排空在途下载是异步的，但不接受新工作了）；
+  // 不在 running 表里的 running 残留行也借此自愈
+  const r = db.prepare(`UPDATE tasks SET status = 'paused', finished_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'running'`).run(taskId);
+  return !!state || Number(r.changes) > 0;
 }
 
 export function resumeTask(taskId: number): void {

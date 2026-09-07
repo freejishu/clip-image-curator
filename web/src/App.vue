@@ -52,13 +52,25 @@ function onKey(e: KeyboardEvent) {
 
 // ---- 任务 ----
 const tasks = ref<Task[]>([]);
+const pausing = ref<Set<number>>(new Set()); // 点了暂停但状态还没翻转的任务（即时反馈）
+async function onPause(id: number) {
+  pausing.value = new Set(pausing.value).add(id);
+  await api.pauseTask(id);
+  await refreshTasks();
+}
 const sources = ref<{ name: string; enabled: boolean; caps?: { fetchPost: boolean; fetchFamily: boolean } }[]>([]);
 /** 某数据源的 optional 能力（驱动灯箱按钮显隐，不再硬编码源名） */
 function srcCap(name: string, cap: 'fetchPost' | 'fetchFamily'): boolean {
   return sources.value.find(s => s.name === name)?.caps?.[cap] ?? false;
 }
 const newTask = ref({ source: 'yandere', tags: '', limit: 100, proxy: '' });
-async function refreshTasks() { tasks.value = await api.tasks(); }
+async function refreshTasks() {
+  tasks.value = await api.tasks();
+  // 状态已不是 running 的任务，清掉「暂停中…」标记
+  const s = new Set(pausing.value);
+  for (const t of tasks.value) if (t.status !== 'running') s.delete(t.id);
+  pausing.value = s;
+}
 let taskTimer: number | undefined;
 watch(tab, (t) => {
   localStorage.setItem('ic-tab', t);
@@ -475,7 +487,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
             <td>{{ t.id }}</td><td>{{ t.source }}</td><td>{{ JSON.parse(t.query).tags.join(' ') }}</td>
             <td>{{ t.status }}</td><td>搜到 {{ t.seen ?? 0 }} · 新增 {{ t.fetched }} · 下载 {{ t.downloaded }}/{{ t.target }}</td><td>{{ fmtTime(t.created_at) }}</td><td>{{ fmtDuration(t) }}</td><td>{{ t.error }}</td>
             <td>
-              <button v-if="t.status === 'running'" @click="api.pauseTask(t.id).then(refreshTasks)">暂停</button>
+              <button v-if="t.status === 'running'" :disabled="pausing.has(t.id)" @click="onPause(t.id)">{{ pausing.has(t.id) ? '暂停中…' : '暂停' }}</button>
               <button v-if="t.status === 'paused' || t.status === 'error'" @click="api.resumeTask(t.id).then(refreshTasks)">继续</button>
             </td>
           </tr>
