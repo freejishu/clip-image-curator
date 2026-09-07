@@ -60,9 +60,26 @@ export const yandere: SourcePlugin = {
     let yielded = 0;
     while (yielded < query.limit) {
       if (opts.shouldContinue && !opts.shouldContinue()) return;
-      const { data } = await http.get<YanderePost[]>('/post.json', {
-        params: { tags: query.tags.join(' '), limit: perPage, page },
-      });
+      // 单页请求带重试：代理偶发抖动不应直接终止整个任务
+      let data: unknown;
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          const resp = await http.get<YanderePost[]>('/post.json', {
+            params: { tags: query.tags.join(' '), limit: perPage, page },
+          });
+          data = resp.data;
+          lastErr = undefined;
+          break;
+        } catch (e) {
+          lastErr = e;
+          if (attempt < 3) {
+            console.warn(`[yandere] 第 ${page} 页请求失败(${attempt + 1}/4): ${e instanceof Error ? e.message : e}，重试…`);
+            await sleep(3000 * (attempt + 1));
+          }
+        }
+      }
+      if (lastErr) throw lastErr;
       if (!Array.isArray(data)) {
         const reason = (data as { reason?: string; error?: string })?.reason ?? (data as { error?: string })?.error ?? JSON.stringify(data).slice(0, 200);
         throw new Error(`yande.re API 返回错误: ${reason}`);
