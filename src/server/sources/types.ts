@@ -14,6 +14,8 @@
 export interface SearchQuery {
   tags: string[];
   limit: number;
+  /** 范围扫描：跳过前 N 条结果再开始产出（缺省/0 = 从头扫） */
+  skip?: number;
 }
 
 export interface FetchOpts {

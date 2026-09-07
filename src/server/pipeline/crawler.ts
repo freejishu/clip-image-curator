@@ -57,7 +57,7 @@ export async function startTask(taskId: number): Promise<void> {
   const state = { paused: false };
   running.set(taskId, state);
   const opts: FetchOpts = { proxy: row.proxy, shouldContinue: () => !state.paused };
-  const query = JSON.parse(row.query) as { tags: string[]; limit: number };
+  const query = JSON.parse(row.query) as { tags: string[]; limit: number; skip?: number };
   const plugin = getSource(row.source);
   const queue = new PQueue({ concurrency: 3, interval: 1000, intervalCap: 2 }); // 礼貌限速
 
@@ -65,7 +65,7 @@ export async function startTask(taskId: number): Promise<void> {
     db.prepare(`UPDATE tasks SET ${fields}, updated_at = datetime('now') WHERE id = ?`).run(...vals, taskId);
 
   try {
-    for await (const batch of plugin.search({ tags: query.tags, limit: query.limit }, opts)) {
+    for await (const batch of plugin.search({ tags: query.tags, limit: query.limit, skip: query.skip }, opts)) {
       if (state.paused) { touch(`status = 'paused', finished_at = datetime('now')`); return; }
       touch('seen = seen + ?', batch.length);
       let added = 0;

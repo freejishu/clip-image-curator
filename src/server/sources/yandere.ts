@@ -54,7 +54,9 @@ export const yandere: SourcePlugin = {
   async *search(query: SearchQuery, opts: FetchOpts) {
     const http = client(opts.proxy);
     const perPage = 100;
-    let page = 1;
+    const skip = Math.max(query.skip ?? 0, 0); // 范围扫描：直接定位起始页，页内再丢弃余数条
+    let page = Math.floor(skip / perPage) + 1;
+    let drop = skip % perPage;
     let yielded = 0;
     while (yielded < query.limit) {
       if (opts.shouldContinue && !opts.shouldContinue()) return;
@@ -68,12 +70,13 @@ export const yandere: SourcePlugin = {
       if (data.length === 0) return;
       const batch: ImageMeta[] = [];
       for (const p of data) {
+        if (drop > 0) { drop--; continue; }
         if (yielded >= query.limit) break;
         if (!p.file_url) continue;
         batch.push(toMeta(p));
         yielded++;
       }
-      yield batch;
+      if (batch.length) yield batch;
       if (data.length < perPage) return;
       page++;
       await sleep(1200); // 礼貌限速

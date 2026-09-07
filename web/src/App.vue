@@ -65,7 +65,11 @@ const sources = ref<{ name: string; enabled: boolean; caps?: { fetchPost: boolea
 function srcCap(name: string, cap: 'fetchPost' | 'fetchFamily'): boolean {
   return sources.value.find(s => s.name === name)?.caps?.[cap] ?? false;
 }
-const newTask = ref({ source: 'yandere', tags: '', limit: 100, proxy: '' });
+const newTask = ref({ source: 'yandere', tags: '', limit: 100, proxy: '', mode: 'head' as 'head' | 'range', start: 0, end: 200 });
+function taskQueryText(q: string): string {
+  const p = JSON.parse(q) as { tags: string[]; limit: number; skip?: number };
+  return p.skip ? `${p.tags.join(' ')}（范围 ${p.skip}~${p.skip + p.limit}）` : p.tags.join(' ');
+}
 async function refreshTasks() {
   tasks.value = await api.tasks();
   // 状态已不是 running 的任务，清掉「暂停中…」标记
@@ -96,7 +100,9 @@ function predClass(s: number | null | undefined): string {
 async function createTask() {
   const tags = newTask.value.tags.split(/\s+/).filter(Boolean);
   if (!tags.length) return alert('请输入至少一个 tag');
-  await api.createTask(newTask.value.source, tags, newTask.value.limit, newTask.value.proxy);
+  const t = newTask.value;
+  if (t.mode === 'range' && !(t.start >= 0 && t.end > t.start)) return alert('范围需满足 0 ≤ 开始 < 结束');
+  await api.createTask(t.source, tags, t.limit, t.proxy, t.mode === 'range' ? { start: t.start, end: t.end } : undefined);
   newTask.value.tags = '';
   await refreshTasks();
 }
@@ -602,10 +608,18 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
           <option v-for="s in sources" :key="s.name" :value="s.name" :disabled="!s.enabled">{{ s.name }}</option>
         </select>
         <input v-model="newTask.tags" placeholder="tags（空格分隔），如 white_thighhighs rating:s">
-        <input v-model.number="newTask.limit" type="number" min="1" max="2000" style="width:90px">
+        <label style="white-space:nowrap"><input type="radio" value="head" v-model="newTask.mode">从头扫</label>
+        <label style="white-space:nowrap"><input type="radio" value="range" v-model="newTask.mode">范围</label>
+        <input v-if="newTask.mode === 'head'" v-model.number="newTask.limit" type="number" min="1" max="2000" style="width:90px" title="扫描条数">
+        <template v-else>
+          <input v-model.number="newTask.start" type="number" min="0" style="width:80px" title="开始位置（跳过前 N 条）">
+          <span style="align-self:center">~</span>
+          <input v-model.number="newTask.end" type="number" min="1" style="width:80px" title="结束位置">
+        </template>
         <input v-model="newTask.proxy" placeholder="代理（留空用默认）" style="width:200px">
         <button type="submit">开始抓取</button>
       </form>
+      <p v-if="newTask.mode === 'range'" class="lb-hint">范围 = 搜索结果的第「开始」到「结束」条（从 0 计，最新的在前），单任务最多扫 2000 条；更大范围请分段创建。</p>
       <div class="toolbar" style="margin:8px 0">
         <button @click="cleanupNopath">🧹 清理「抓到链接但未下载」的记录</button>
         <span v-if="cleanupMsg" class="c-ok">{{ cleanupMsg }}</span>
@@ -614,7 +628,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <thead><tr><th>ID</th><th>源</th><th>查询</th><th>状态</th><th>搜到/新增/下载</th><th>开始时间</th><th>耗时</th><th>错误</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="t in tasks" :key="t.id">
-            <td>{{ t.id }}</td><td>{{ t.source }}</td><td>{{ JSON.parse(t.query).tags.join(' ') }}</td>
+            <td>{{ t.id }}</td><td>{{ t.source }}</td><td>{{ taskQueryText(t.query) }}</td>
             <td>{{ t.status }}</td><td>搜到 {{ t.seen ?? 0 }} · 新增 {{ t.fetched }} · 下载 {{ t.downloaded }}/{{ t.target }}</td><td>{{ fmtTime(t.created_at) }}</td><td>{{ fmtDuration(t) }}</td><td>{{ t.error }}</td>
             <td>
               <button v-if="t.status === 'running'" :disabled="pausing.has(t.id)" @click="onPause(t.id)">{{ pausing.has(t.id) ? '暂停中…' : '暂停' }}</button>
