@@ -254,7 +254,7 @@ async function refreshModel() {
   prefs.value = await api.preferences();
   trainState.value = await api.trainStatus();
 }
-async function startTrain() { trainState.value = { status: 'running', progress: '已启动，正在准备…（首次向量化较慢）' }; await api.train(); pollTrain(); }
+async function startTrain() { trainState.value = { status: 'running', progress: '已启动，正在加载模型…' }; await api.train(); pollTrain(); }
 async function startZeroshot() { trainState.value = { status: 'running', progress: '已启动，正在加载模型…' }; await api.zeroshot(); pollTrain(); }
 function pollTrain() {
   window.clearInterval(pollTimer);

@@ -48,6 +48,7 @@ export async function zeroshotScoreAll(limit = 200, onProgress?: (msg: string) =
     db.prepare('UPDATE images SET pred_score = ?, pred_version = 0 WHERE id = ?').run(score, row.id);
     done++;
     if (done % 10 === 0) onProgress?.(`zeroshot ${done}/${rows.length}`);
+    await new Promise(r => setImmediate(r)); // 让出事件循环：HTTP 轮询不被推理饿死
   }
   return done;
 }

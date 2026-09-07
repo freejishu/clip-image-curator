@@ -57,6 +57,7 @@ export async function ensureEmbedding(imageId: number): Promise<Float32Array | n
 export interface TrainResult { version: number; samples: number; likes: number; dislikes: number; scored: number }
 
 export async function train(onProgress?: (msg: string) => void): Promise<TrainResult> {
+  onProgress?.('加载 CLIP 模型并准备样本…'); // 模型加载（数百 MB）期间给前端一个真实状态
   const labeled = db.prepare(`
     SELECT id, tags, user_label FROM images
     WHERE user_label IN ('like','dislike') AND local_path IS NOT NULL
@@ -73,6 +74,7 @@ export async function train(onProgress?: (msg: string) => void): Promise<TrainRe
     X.push(featurize(vec, JSON.parse(row.tags) as string[], vocab, dim));
     y.push(row.user_label === 'like' ? 1 : 0);
     onProgress?.(`embedding ${X.length}/${labeled.length}`);
+    await new Promise(r => setImmediate(r)); // 让出事件循环：HTTP 轮询不被向量化的重计算饿死
   }
   if (X.length < 10) throw new Error(`标注样本不足（${X.length}），至少需要 10 条喜欢/不喜欢标注`);
 
@@ -113,6 +115,7 @@ export async function train(onProgress?: (msg: string) => void): Promise<TrainRe
     db.prepare('UPDATE images SET pred_score = ?, pred_version = ? WHERE id = ?').run(p, version, row.id);
     scored++;
     if (scored % 50 === 0) onProgress?.(`scoring ${scored}/${all.length}`);
+    await new Promise(r => setImmediate(r)); // 让出事件循环
   }
 
   const likes = y.filter(v => v === 1).length;
@@ -141,6 +144,7 @@ export async function scoreUnscored(onProgress?: (msg: string) => void): Promise
     db.prepare('UPDATE images SET pred_score = ?, pred_version = ? WHERE id = ?').run(p, model.version, row.id);
     scored++;
     if (scored % 20 === 0) onProgress?.(`auto-scoring ${scored}/${rows.length}`);
+    await new Promise(r => setImmediate(r)); // 让出事件循环
   }
   return scored;
 }
