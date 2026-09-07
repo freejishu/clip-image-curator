@@ -52,6 +52,7 @@ export async function startTask(taskId: number): Promise<void> {
     source: string; query: string; proxy: string | null; target: number;
   } | undefined;
   if (!row) throw new Error(`任务不存在: ${taskId}`);
+  if (running.has(taskId)) return; // 已在运行：resume 连点/旧实例未退出时不得再起并发实例（否则旧实例退出会误删新实例状态）
 
   const state = { paused: false };
   running.set(taskId, state);
@@ -84,8 +85,11 @@ export async function startTask(taskId: number): Promise<void> {
                 markProcessedStmt.run(ruleFingerprint(ruleFor(config.storage.type ?? 'local')), meta.source, meta.sourceId);
                 touch('downloaded = downloaded + 1');
                 return;
-              } catch {
-                if (attempt === 2) throw new Error(`下载失败: ${filename}`);
+              } catch (e) {
+                if (attempt === 2) {
+                  console.warn(`[task ${taskId}] 下载失败 ${filename}: ${e instanceof Error ? e.message : e}`); // 不再静默吞错，失败必须可见
+                  throw new Error(`下载失败: ${filename}`);
+                }
                 await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
               }
             }
@@ -95,18 +99,21 @@ export async function startTask(taskId: number): Promise<void> {
       touch('fetched = fetched + ?', added);
     }
     await queue.onIdle();
-    touch(`status = '${state.paused ? 'paused' : 'done'}', finished_at = datetime('now')`);
-    // 新图自动打分：有已训练模型→按模型预测；无模型→zero-shot 粗筛
-    if (!state.paused) {
-      try {
-        const n = loadModel() ? await scoreUnscored() : await zeroshotScoreAll(200);
-        if (n > 0) console.log(`任务 ${taskId} 完成，自动打分 ${n} 张新图`);
-      } catch (e) { console.warn(`任务 ${taskId} 自动打分失败:`, e instanceof Error ? e.message : e); }
+    // 只有「自己仍是登记在册的实例」才落终态：旧实例退出不得覆盖新实例的 running 状态
+    if (running.get(taskId) === state) {
+      touch(`status = '${state.paused ? 'paused' : 'done'}', finished_at = datetime('now')`);
+      // 新图自动打分：有已训练模型→按模型预测；无模型→zero-shot 粗筛
+      if (!state.paused) {
+        try {
+          const n = loadModel() ? await scoreUnscored() : await zeroshotScoreAll(200);
+          if (n > 0) console.log(`任务 ${taskId} 完成，自动打分 ${n} 张新图`);
+        } catch (e) { console.warn(`任务 ${taskId} 自动打分失败:`, e instanceof Error ? e.message : e); }
+      }
     }
   } catch (err) {
     touch(`status = 'error', finished_at = datetime('now'), error = ?`, err instanceof Error ? err.message : String(err));
   } finally {
-    running.delete(taskId);
+    if (running.get(taskId) === state) running.delete(taskId); // 只删自己，防旧实例误删新实例
   }
 }
 
@@ -120,7 +127,7 @@ export function pauseTask(taskId: number): boolean {
 }
 
 export function resumeTask(taskId: number): void {
-  // finished_at 清空：续跑期间耗时继续累计，到终态再落定
-  db.prepare(`UPDATE tasks SET status = 'running', finished_at = NULL, updated_at = datetime('now') WHERE id = ?`).run(taskId);
+  // finished_at 清空：续跑期间耗时继续累计，到终态再落定；同时清掉上一轮残留的 error 文案
+  db.prepare(`UPDATE tasks SET status = 'running', finished_at = NULL, error = NULL, updated_at = datetime('now') WHERE id = ?`).run(taskId);
   void startTask(taskId);
 }
