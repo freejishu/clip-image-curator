@@ -15,7 +15,10 @@ async function load(): Promise<ZeroShotPipeline> {
 
 function getPipe(): Promise<ZeroShotPipeline> {
   if (pipe) return Promise.resolve(pipe);
-  if (!loading) loading = load().then(p => (pipe = p));
+  if (!loading) {
+    loading = load().then(p => (pipe = p));
+    loading.catch(() => { loading = null; }); // 加载失败允许重试（同 embed.ts）
+  }
   return loading;
 }
 
@@ -28,12 +31,17 @@ export async function zeroshotScoreAll(limit = 200, onProgress?: (msg: string) =
     LIMIT ?
   `).all(limit) as { id: number; local_path: string }[];
   const p = await getPipe();
-  let done = 0;
+  let done = 0, failed = 0;
   for (const row of rows) {
     let out: { score: number; label: string }[];
     try {
       out = await p(row.local_path, labels);
-    } catch { continue; } // 坏图跳过
+    } catch (e) {
+      // 坏图跳过；记录原因（以前静默吞掉，故障时完全无迹可查）
+      failed++;
+      if (failed <= 3 || failed % 50 === 0) console.warn(`[zeroshot] 跳过 id=${row.id}: ${e instanceof Error ? e.message : e}`);
+      continue;
+    }
     const pos = out.filter(o => config.zeroshot.positive.includes(o.label));
     const score = pos.length ? Math.max(...pos.map(o => o.score)) : 0;
     db.prepare('UPDATE images SET pred_score = ?, pred_version = 0 WHERE id = ?').run(score, row.id);

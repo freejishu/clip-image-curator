@@ -20,10 +20,14 @@ async function loadFeaturePipeline(): Promise<FeaturePipeline> {
   return p as unknown as FeaturePipeline;
 }
 
-/** 懒加载 CLIP 特征提取管线（首次触发会下载约 350MB 模型到 data/models） */
+/** 懒加载 CLIP 特征提取管线（首次触发会下载约 350MB 模型到 data/models）。
+ *  加载失败时重置 loading 允许下次重试——否则一次瞬断会让本进程永久无法 embedding（只能重启恢复） */
 export function getFeaturePipeline(): Promise<FeaturePipeline> {
   if (featurePipe) return Promise.resolve(featurePipe);
-  if (!loading) loading = loadFeaturePipeline().then(p => (featurePipe = p));
+  if (!loading) {
+    loading = loadFeaturePipeline().then(p => (featurePipe = p));
+    loading.catch(() => { loading = null; });
+  }
   return loading;
 }
 
