@@ -6,6 +6,8 @@ import type { FetchOpts, ImageMeta } from '../sources/types.js';
 import { storage } from '../storage/backend.js';
 import { loadModel, scoreUnscored } from '../ml/classifier.js';
 import { zeroshotScoreAll } from '../ml/zeroshot.js';
+import { config } from '../config.js';
+import { ruleFor, ruleFingerprint } from './transform.js';
 
 const running = new Map<number, { paused: boolean }>();
 
@@ -28,6 +30,8 @@ const insertStmt = db.prepare(`
 `);
 const localPathStmt = db.prepare('SELECT local_path FROM images WHERE source = ? AND source_id = ?');
 const setLocalPathStmt = db.prepare('UPDATE images SET local_path = ? WHERE source = ? AND source_id = ?');
+// 新下载的图在入库时已按当前规则处理过，记录指纹避免存量批处理二次压缩
+const markProcessedStmt = db.prepare('UPDATE images SET imgproc = ? WHERE source = ? AND source_id = ?');
 
 function insertImage(meta: ImageMeta): boolean {
   const r = insertStmt.run(
@@ -77,6 +81,7 @@ export async function startTask(taskId: number): Promise<void> {
                 const buf = await plugin.fetchImage(meta, opts); const file = filename + extOf(meta.fileUrl, buf);
                 const localPath = await storage.saveIncoming(buf, file);
                 setLocalPathStmt.run(localPath, meta.source, meta.sourceId);
+                markProcessedStmt.run(ruleFingerprint(ruleFor(config.storage.type ?? 'local')), meta.source, meta.sourceId);
                 touch('downloaded = downloaded + 1');
                 return;
               } catch {

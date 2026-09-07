@@ -63,6 +63,9 @@ try {
 try {
   db.exec('ALTER TABLE tasks ADD COLUMN finished_at TEXT');
 } catch { /* column already exists */ }
+try {
+  db.exec('ALTER TABLE images ADD COLUMN imgproc TEXT'); // 图片转换/压缩规则指纹：同指纹跳过，规则变更才重处理
+} catch { /* column already exists */ }
 // 兜底（幂等）：任何路径漏写 finished_at 的终态任务，用 updated_at 补上（耗时不再虚增）
 db.exec(`UPDATE tasks SET finished_at = updated_at WHERE finished_at IS NULL AND status IN ('done','paused','error')`);
 

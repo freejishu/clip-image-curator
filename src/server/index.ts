@@ -9,6 +9,7 @@ import { taskRoutes } from './routes/tasks.js';
 import { imageRoutes } from './routes/images.js';
 import { trainRoutes } from './routes/train.js';
 import { settingsRoutes } from './routes/settings.js';
+import { storageRoutes } from './routes/storages.js';
 
 const app = Fastify({ logger: true });
 
@@ -41,6 +42,7 @@ taskRoutes(app);
 imageRoutes(app);
 trainRoutes(app);
 settingsRoutes(app);
+storageRoutes(app);
 
 // 生产模式：托管前端构建产物
 const webDist = path.resolve(process.cwd(), 'web/dist');

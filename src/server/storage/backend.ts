@@ -1,6 +1,7 @@
 ﻿import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { processImage, ruleFor } from '../pipeline/transform.js';
 
 /** 存储后端接口：LocalFS 首期，WebDAV/OpenList 预留 */
 export interface StorageBackend {
@@ -55,4 +56,20 @@ export function resolveArchiveFolder(tagsJson: string): string | null {
 
 // 预留：class WebDavBackend implements StorageBackend { ... OpenList WebDAV ... }
 
-export const storage: StorageBackend = new LocalFSBackend();
+/** 转换+压缩装饰器：任何后端包一层即获得入库前「格式转换 → 压缩」能力（动图不处理），未来 WebDAV/OpenList 直接复用 */
+export class TransformingBackend implements StorageBackend {
+  constructor(private inner: StorageBackend, private type: string) {}
+  async saveIncoming(buf: Buffer, filename: string): Promise<string> {
+    const r = await processImage(buf, filename, ruleFor(this.type));
+    if (r.steps.length) console.log(`[image-process] ${filename}: ${r.steps.join('；')}`);
+    return this.inner.saveIncoming(r.buf, r.filename);
+  }
+  archiveFavorite(srcPath: string, filename: string, subfolder?: string | null): Promise<void> {
+    return this.inner.archiveFavorite(srcPath, filename, subfolder);
+  }
+  removeFavorite(filename: string, subfolder?: string | null): Promise<void> {
+    return this.inner.removeFavorite(filename, subfolder);
+  }
+}
+
+export const storage: StorageBackend = new TransformingBackend(new LocalFSBackend(), config.storage.type ?? 'local');

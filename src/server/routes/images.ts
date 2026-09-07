@@ -8,6 +8,7 @@ import { config } from '../config.js';
 import { propagateGroupIds, bindImages, unbindImage, albumGroupKeys, albumGroupMembers, invalidateGroupCache } from '../groups.js';
 import { getSource, sourcesWith } from '../sources/index.js';
 import { extOf } from '../pipeline/crawler.js';
+import { ruleFor, ruleFingerprint } from '../pipeline/transform.js';
 import type { ImageMeta } from '../sources/types.js';
 
 const MIME: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp' };
@@ -242,7 +243,8 @@ export function imageRoutes(app: FastifyInstance) {
         if (!cur.local_path) {
           const buf = await plugin.fetchImage(meta, opts);
           const localPath = await storage.saveIncoming(buf, `${meta.source}_${meta.sourceId}${extOf(meta.fileUrl, buf)}`);
-          db.prepare('UPDATE images SET local_path = ? WHERE id = ?').run(localPath, cur.id);
+          db.prepare('UPDATE images SET local_path = ?, imgproc = ? WHERE id = ?')
+            .run(localPath, ruleFingerprint(ruleFor(config.storage.type ?? 'local')), cur.id); // 入库时已按当前规则处理，记录指纹
           cur = { ...cur, local_path: localPath };
         }
         if (cur.user_label !== 'like') {

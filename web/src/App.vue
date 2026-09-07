@@ -1,9 +1,9 @@
 ﻿<script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
-import { api, type NextImage, type Task, type Stats } from './api';
+import { api, type NextImage, type Task, type Stats, type StorageRow, type CompressionRule, type FormatRule, type ReprocessStatus } from './api';
 
 type Tab = 'rate' | 'review' | 'album' | 'tasks' | 'settings';
-type SettingsTab = 'base' | 'model';
+type SettingsTab = 'base' | 'model' | 'storage';
 const savedTabRaw = localStorage.getItem('ic-tab'); // 旧版本有 'model' 页签，并入设置
 const tab = ref<Tab>((savedTabRaw === 'model' ? 'settings' : savedTabRaw ?? 'rate') as Tab); // 刷新后回到原页面
 const settingsTab = ref<SettingsTab>(savedTabRaw === 'model' ? 'model' : 'base');
@@ -81,7 +81,7 @@ watch(tab, (t) => {
   if (t === 'rate') loadNext(); // 回到打分页：按最新预测分重新取第一张
   if (t === 'review') refreshReview();
   if (t === 'album') refreshAlbum();
-  if (t === 'settings') { refreshModel(); loadSettings(); }
+  if (t === 'settings') { refreshModel(); loadSettings(); loadStorages(); }
 });
 
 function predText(s: number | null | undefined): string {
@@ -313,6 +313,77 @@ async function restartNow() {
       if (r.ok) { window.clearInterval(timer); location.reload(); }
     } catch { /* 还没起来，继续等 */ }
   }, 1000);
+}
+
+// ---- 设置：存储 ----
+const storages = ref<StorageRow[]>([]);
+const storeMsg = ref('');
+const editing = ref<{ type: string; kind: 'compression' | 'formats' } | null>(null);
+const compForm = ref<CompressionRule>({ enabled: false, mode: 'scale', scalePercent: 80, maxSizeMB: 2 });
+const fmtForm = ref<FormatRule>({ enabled: [], convertTo: 'webp' });
+const savingStore = ref(false);
+const repro = ref<ReprocessStatus | null>(null);
+let reproTimer: number | undefined;
+
+async function loadStorages() { storages.value = await api.storages(); }
+
+function fmtBytes(n: number): string {
+  if (n >= 1 << 30) return (n / (1 << 30)).toFixed(1) + ' GB';
+  if (n >= 1 << 20) return (n / (1 << 20)).toFixed(1) + ' MB';
+  return (n / 1024).toFixed(0) + ' KB';
+}
+
+function openStoreEdit(s: StorageRow, kind: 'compression' | 'formats') {
+  editing.value = { type: s.type, kind };
+  storeMsg.value = '';
+  compForm.value = { ...s.process.compression };
+  fmtForm.value = { enabled: [...s.process.formats.enabled], convertTo: s.process.formats.convertTo };
+}
+
+async function saveCompression() {
+  if (!editing.value || savingStore.value) return;
+  savingStore.value = true; storeMsg.value = '';
+  try {
+    await api.saveCompression(editing.value.type, compForm.value);
+    storeMsg.value = '✓ 压缩设置已保存，新下载的图片立即生效';
+    editing.value = null;
+    await loadStorages();
+  } catch (e) { storeMsg.value = `✕ ${e instanceof Error ? e.message : String(e)}`; }
+  finally { savingStore.value = false; }
+}
+
+async function saveFormats() {
+  if (!editing.value || savingStore.value) return;
+  savingStore.value = true; storeMsg.value = '';
+  try {
+    await api.saveFormats(editing.value.type, fmtForm.value);
+    storeMsg.value = '✓ 格式设置已保存，新下载的图片立即生效';
+    editing.value = null;
+    await loadStorages();
+  } catch (e) { storeMsg.value = `✕ ${e instanceof Error ? e.message : String(e)}`; }
+  finally { savingStore.value = false; }
+}
+
+async function runReprocess(s: StorageRow) {
+  if (repro.value?.running) return;
+  const c = s.process.compression;
+  const desc = c.enabled
+    ? (c.mode === 'scale' ? `尺寸缩放到 ${c.scalePercent}%` : `单张不超过 ${c.maxSizeMB}MB`)
+    : '仅按格式规则转换（压缩未启用）';
+  if (!window.confirm(`将按当前规则处理「${s.name}」中的全部存量图片：\n\n格式：保留 [${s.process.formats.enabled.join(', ')}]，其余转为 ${s.process.formats.convertTo}\n压缩：${desc}\n\n处理前会自动备份数据库；每张图处理成功后才替换原文件，失败保留原图。动图不受影响。是否继续？`)) return;
+  try {
+    await api.processExisting(s.type);
+    repro.value = { running: true, phase: 'starting', done: 0, total: 0, processed: 0, skipped: 0, failed: 0, savedBytes: 0, error: '' };
+    window.clearInterval(reproTimer);
+    reproTimer = window.setInterval(async () => {
+      repro.value = await api.processStatus();
+      if (!repro.value.running) {
+        window.clearInterval(reproTimer);
+        if (repro.value.phase === 'done') storeMsg.value = `✓ 存量处理完成：压缩/转换 ${repro.value.processed} 张，跳过 ${repro.value.skipped} 张，失败 ${repro.value.failed} 张，节省 ${fmtBytes(repro.value.savedBytes)}`;
+        else if (repro.value.error) storeMsg.value = `✕ 存量处理失败: ${repro.value.error}`;
+      }
+    }, 1000);
+  } catch (e) { storeMsg.value = `✕ ${e instanceof Error ? e.message : String(e)}`; }
 }
 
 // ---- 审查/修正 ----
@@ -554,11 +625,12 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       </table>
     </section>
 
-    <!-- 设置（基础设置 / 模型与偏好） -->
+    <!-- 设置（基础设置 / 模型与偏好 / 存储设置） -->
     <section v-else>
       <div class="toolbar">
         <button :class="{ on: settingsTab === 'base' }" @click="settingsTab = 'base'">基础设置</button>
         <button :class="{ on: settingsTab === 'model' }" @click="settingsTab = 'model'">模型与偏好</button>
+        <button :class="{ on: settingsTab === 'storage' }" @click="settingsTab = 'storage'; loadStorages()">存储设置</button>
       </div>
 
       <!-- 基础设置：数据目录 -->
@@ -584,7 +656,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       </div>
 
       <!-- 模型与偏好 -->
-      <template v-else>
+      <template v-else-if="settingsTab === 'model'">
         <div v-if="stats" class="stats">
           <span>总数 {{ stats.total }}</span><span>已下载 {{ stats.downloaded }}</span>
           <span class="c-like">喜欢 {{ stats.liked }}</span><span class="c-dislike">不喜欢 {{ stats.disliked }}</span>
@@ -606,6 +678,74 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         </div>
         <p v-else>尚未训练。先标注一批图片（或先跑 zero-shot 粗筛提高标注效率），然后点"训练模型"。</p>
       </template>
+
+      <!-- 存储设置 -->
+      <div v-else class="settings-base">
+        <h3>存储设置</h3>
+        <p class="lb-hint">压缩与格式规则按存储类型独立配置，保存后对新下载的图片立即生效；「处理存量」按当前规则批量处理已有图片。动图（GIF / 动图 WebP）不参与转换与压缩，转换目标不可选 GIF。</p>
+        <table>
+          <thead><tr><th>名称</th><th>位置</th><th>剩余空间</th><th>压缩</th><th>格式</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr v-for="s in storages" :key="s.type">
+              <td>{{ s.name }}（{{ s.type }}）</td>
+              <td><code>{{ s.incoming }}</code></td>
+              <td>{{ fmtBytes(s.freeBytes) }} / {{ fmtBytes(s.totalBytes) }}</td>
+              <td>{{ s.process.compression.enabled ? (s.process.compression.mode === 'scale' ? `尺寸 ×${s.process.compression.scalePercent}%` : `≤ ${s.process.compression.maxSizeMB}MB/张`) : '未启用' }}</td>
+              <td>保留 [{{ s.process.formats.enabled.join(', ') }}] → {{ s.process.formats.convertTo }}</td>
+              <td class="store-ops">
+                <button @click="openStoreEdit(s, 'compression')">图片压缩</button>
+                <button @click="openStoreEdit(s, 'formats')">格式设置</button>
+                <button :disabled="repro?.running" @click="runReprocess(s)">处理存量</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- 压缩设置面板 -->
+        <div v-if="editing?.kind === 'compression'" class="store-panel">
+          <h3>图片压缩（{{ editing.type }}）</h3>
+          <label class="store-row"><input type="checkbox" v-model="compForm.enabled"> 启用压缩</label>
+          <template v-if="compForm.enabled">
+            <label class="store-row">
+              <input type="radio" value="scale" v-model="compForm.mode"> 固定比例（按尺寸）：缩放到原图的
+              <input type="number" v-model.number="compForm.scalePercent" min="1" max="100" class="num"> %
+            </label>
+            <label class="store-row">
+              <input type="radio" value="maxSize" v-model="compForm.mode"> 最大单张大小：超过
+              <input type="number" v-model.number="compForm.maxSizeMB" min="0.1" max="50" step="0.1" class="num"> MB 时压缩到该值以内（质量 80，自动估算缩放，±5% 误差）
+            </label>
+          </template>
+          <div class="store-ops">
+            <button :disabled="savingStore" @click="saveCompression">保存</button>
+            <button @click="editing = null">取消</button>
+          </div>
+        </div>
+
+        <!-- 格式设置面板 -->
+        <div v-else-if="editing?.kind === 'formats'" class="store-panel">
+          <h3>格式设置（{{ editing.type }}）</h3>
+          <div class="store-row">
+            启用的格式：
+            <label v-for="f in storages.find(x => x.type === editing!.type)?.formatOptions.common ?? []" :key="f" style="margin-right:10px">
+              <input type="checkbox" :value="f" v-model="fmtForm.enabled"> {{ f }}
+            </label>
+          </div>
+          <label class="store-row">
+            不在启用范围内的图片自动转换为：
+            <select v-model="fmtForm.convertTo">
+              <option v-for="f in storages.find(x => x.type === editing!.type)?.formatOptions.convertTargets ?? []" :key="f" :value="f">{{ f }}</option>
+            </select>
+          </label>
+          <p class="lb-hint">转换目标必须在启用列表内；不支持转换为 GIF。</p>
+          <div class="store-ops">
+            <button :disabled="savingStore" @click="saveFormats">保存</button>
+            <button @click="editing = null">取消</button>
+          </div>
+        </div>
+
+        <div v-if="repro?.running" class="running">⏳ 存量处理中{{ repro.phase === 'process' ? `（${repro.done}/${repro.total}）` : '…' }}，请勿关闭页面</div>
+        <span v-if="storeMsg" :class="storeMsg.startsWith('✕') ? 'c-dislike' : 'c-ok'">{{ storeMsg }}</span>
+      </div>
     </section>
   </div>
 </template>
@@ -658,6 +798,14 @@ th, td { border-bottom: 1px solid #2a2d34; padding: 6px 8px; text-align: left; }
 .c-ok { color: #7ee2a8; }
 .settings-base h3 { margin: 4px 0 6px; font-size: 15px; }
 .path-list { margin: 10px 0 14px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.store-panel { margin: 14px 0; padding: 12px 14px; background: #1d2026; border: 1px solid #2a2d34; border-radius: 8px; }
+.store-row { display: block; margin: 8px 0; font-size: 13px; }
+.store-row .num { width: 70px; background: #14161a; border: 1px solid #333; color: #eee; padding: 4px 6px; border-radius: 4px; }
+.store-row select { background: #14161a; border: 1px solid #333; color: #eee; padding: 4px 8px; border-radius: 4px; }
+.store-ops { display: flex; gap: 8px; }
+.store-ops button { background: #23262d; color: #ccc; border: 1px solid #333; padding: 5px 12px; border-radius: 6px; cursor: pointer; }
+.store-ops button:hover { color: #fff; border-color: #3b82f6; }
+.store-ops button:disabled { opacity: .4; cursor: not-allowed; }
 .path-list span { display: inline-block; width: 90px; color: #888; }
 .path-list code { color: #7ab3ff; word-break: break-all; }
 .restart-btn { background: #e5484d; border: none; color: #fff; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; }

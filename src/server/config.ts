@@ -2,6 +2,9 @@
 import path from 'node:path';
 
 export interface SourceConfig { enabled: boolean; proxy?: string | null }
+export interface CompressionRule { enabled: boolean; mode: 'scale' | 'maxSize'; scalePercent: number; maxSizeMB: number }
+export interface FormatRule { enabled: string[]; convertTo: string }
+export interface ImageProcessRule { compression: CompressionRule; formats: FormatRule }
 export interface AppConfig {
   port: number;
   host?: string;
@@ -12,6 +15,8 @@ export interface AppConfig {
   sources: Record<string, SourceConfig>;
   archiveRules?: { folder: string; tags: string[] }[];
   zeroshot: { positive: string[]; negative: string[] };
+  /** 按后端类型（local/webdav...）分别配置的图片转换+压缩规则，缺省 = 不处理 */
+  imageProcess?: Record<string, ImageProcessRule>;
 }
 
 function readJson(p: string): AppConfig {

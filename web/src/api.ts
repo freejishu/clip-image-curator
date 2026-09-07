@@ -11,6 +11,18 @@ export interface Stats {
   total: number; downloaded: number; liked: number; disliked: number;
   skipped: number; unlabeled: number; withEmbedding: number;
 }
+export interface CompressionRule { enabled: boolean; mode: 'scale' | 'maxSize'; scalePercent: number; maxSizeMB: number }
+export interface FormatRule { enabled: string[]; convertTo: string }
+export interface StorageRow {
+  type: string; name: string; incoming: string; favorites: string;
+  freeBytes: number; totalBytes: number;
+  process: { compression: CompressionRule; formats: FormatRule };
+  formatOptions: { common: string[]; convertTargets: string[] };
+}
+export interface ReprocessStatus {
+  running: boolean; phase: string; done: number; total: number;
+  processed: number; skipped: number; failed: number; savedBytes: number; error: string;
+}
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
@@ -46,4 +58,9 @@ export const api = {
   migrateDataDir: (p: string) => req<{ ok: boolean }>('/api/settings/migrate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) }),
   migrateStatus: () => req<{ running: boolean; phase: string; done: number; total: number; error: string }>('/api/settings/migrate-status'),
   restart: () => req<{ ok: boolean }>('/api/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+  storages: () => req<StorageRow[]>('/api/storages'),
+  saveCompression: (type: string, c: CompressionRule) => req<{ ok: boolean }>(`/api/storages/${type}/compression`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(c) }),
+  saveFormats: (type: string, f: FormatRule) => req<{ ok: boolean }>(`/api/storages/${type}/formats`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(f) }),
+  processExisting: (type: string) => req<{ ok: boolean }>(`/api/storages/${type}/process-existing`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+  processStatus: () => req<ReprocessStatus>('/api/storages/process-status'),
 };
