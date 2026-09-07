@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { db } from '../db.js';
 import type { ImageRow } from '../db.js';
-import { storage, resolveArchiveFolder } from '../storage/backend.js';
+import { storage, resolveArchiveFolder, resolveStoredPath } from '../storage/backend.js';
 import { config } from '../config.js';
 import { propagateGroupIds, bindImages, unbindImage, albumGroupKeys, albumGroupMembers, invalidateGroupCache } from '../groups.js';
 import { getSource, sourcesWith } from '../sources/index.js';
@@ -46,11 +46,12 @@ export function imageRoutes(app: FastifyInstance) {
   app.get('/api/images/:id/thumb', async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     const row = db.prepare('SELECT local_path FROM images WHERE id = ?').get(id) as { local_path: string | null } | undefined;
-    if (!row?.local_path || !fs.existsSync(row.local_path)) return reply.code(404).send({ error: '文件不存在' });
+    const filePath = row?.local_path ? resolveStoredPath(row.local_path) : null;
+    if (!filePath || !fs.existsSync(filePath)) return reply.code(404).send({ error: '文件不存在' });
     const thumbPath = path.join(thumbDir, `${id}.jpg`);
     if (!fs.existsSync(thumbPath)) {
       const sharp = (await import('sharp')).default;
-      await sharp(row.local_path).resize(320, 320, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 70 }).toFile(thumbPath);
+      await sharp(filePath).resize(320, 320, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 70 }).toFile(thumbPath);
     }
     reply.header('Content-Type', 'image/jpeg');
     reply.header('Cache-Control', 'max-age=86400');
@@ -60,10 +61,11 @@ export function imageRoutes(app: FastifyInstance) {
   app.get('/api/images/:id/file', async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     const row = db.prepare('SELECT local_path FROM images WHERE id = ?').get(id) as { local_path: string | null } | undefined;
-    if (!row?.local_path || !fs.existsSync(row.local_path)) return reply.code(404).send({ error: '文件不存在' });
-    const ext = path.extname(row.local_path).toLowerCase();
+    const filePath = row?.local_path ? resolveStoredPath(row.local_path) : null;
+    if (!filePath || !fs.existsSync(filePath)) return reply.code(404).send({ error: '文件不存在' });
+    const ext = path.extname(filePath).toLowerCase();
     reply.header('Content-Type', MIME[ext] ?? 'application/octet-stream');
-    return reply.send(fs.createReadStream(row.local_path));
+    return reply.send(fs.createReadStream(filePath));
   });
 
   app.post('/api/images/:id/label', async (req, reply) => {

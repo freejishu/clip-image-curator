@@ -1,5 +1,6 @@
 ﻿import { db, getMeta, setMeta } from '../db.js';
 import { embedImage } from './embed.js';
+import { resolveStoredPath } from '../storage/backend.js';
 
 /** 逻辑回归模型（纯 TS 实现，梯度下降） */
 export interface Model {
@@ -43,7 +44,7 @@ export async function ensureEmbedding(imageId: number): Promise<Float32Array | n
   if (!row?.local_path) return null;
   if (row.embedding) return new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.length / 4);
   try {
-    const vec = await embedImage(row.local_path);
+    const vec = await embedImage(resolveStoredPath(row.local_path));
     db.prepare('UPDATE images SET embedding = ? WHERE id = ?').run(Buffer.from(vec.buffer), imageId);
     return vec;
   } catch (err) {

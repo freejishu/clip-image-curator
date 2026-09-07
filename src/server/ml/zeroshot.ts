@@ -1,6 +1,7 @@
 ﻿import path from 'node:path';
 import { config } from '../config.js';
 import { db } from '../db.js';
+import { resolveStoredPath } from '../storage/backend.js';
 
 type ZeroShotPipeline = (image: string, labels: string[]) => Promise<{ score: number; label: string }[]>;
 let pipe: ZeroShotPipeline | null = null;
@@ -35,7 +36,7 @@ export async function zeroshotScoreAll(limit = 200, onProgress?: (msg: string) =
   for (const row of rows) {
     let out: { score: number; label: string }[];
     try {
-      out = await p(row.local_path, labels);
+      out = await p(resolveStoredPath(row.local_path), labels);
     } catch (e) {
       // 坏图跳过；记录原因（以前静默吞掉，故障时完全无迹可查）
       failed++;

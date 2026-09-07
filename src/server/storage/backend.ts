@@ -15,14 +15,25 @@ function favDir(subfolder?: string | null): string {
   return dir;
 }
 
+/** 存库路径统一为相对 dataDir 的相对路径（项目/数据目录整体搬迁不受影响）；不在 dataDir 下的退回绝对路径 */
+export function toStoredPath(absPath: string): string {
+  const rel = path.relative(config.dataDir, absPath);
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : absPath;
+}
+
+/** 读取时还原成本机绝对路径：相对路径基于当前 dataDir 解析；历史绝对路径原样使用 */
+export function resolveStoredPath(p: string): string {
+  return path.isAbsolute(p) ? p : path.join(config.dataDir, p);
+}
+
 export class LocalFSBackend implements StorageBackend {
   async saveIncoming(buf: Buffer, filename: string): Promise<string> {
     const p = path.join(config.storage.incoming, filename);
     await fs.promises.writeFile(p, buf);
-    return p;
+    return toStoredPath(p);
   }
   async archiveFavorite(srcPath: string, filename: string, subfolder?: string | null): Promise<void> {
-    await fs.promises.copyFile(srcPath, path.join(favDir(subfolder), filename));
+    await fs.promises.copyFile(resolveStoredPath(srcPath), path.join(favDir(subfolder), filename));
   }
   async removeFavorite(filename: string, subfolder?: string | null): Promise<void> {
     await fs.promises.rm(path.join(favDir(subfolder), filename), { force: true });
