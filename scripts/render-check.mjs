@@ -6,7 +6,7 @@ const edge = ['C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe
   'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'].find(p => fs.existsSync(p));
 console.log('Edge:', edge);
 const dom = execFileSync(edge, ['--headless=new', '--disable-gpu', '--dump-dom',
-  '--virtual-time-budget=8000', 'http://127.0.0.1:5176/'], { maxBuffer: 20 * 1024 * 1024 }).toString();
+  '--virtual-time-budget=8000', 'http://127.0.0.1:30041/'], { maxBuffer: 20 * 1024 * 1024 }).toString();
 console.log('DOM 长度:', dom.length);
 const m = dom.match(/<div id="app">([\s\S]*?)<\/body>/);
 console.log('app 渲染内容长度:', m ? m[1].length : 'N/A');

@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const BASE = 'http://127.0.0.1:5176';
+const BASE = 'http://127.0.0.1:30041';
 const db = new DatabaseSync('data/curator.db');
 const post = (url, body) => fetch(BASE + url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) }).then(async r => ({ status: r.status, body: await r.json().catch(() => ({})) }));
 

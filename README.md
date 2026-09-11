@@ -9,9 +9,9 @@
 # 或手动：
 npm install
 Copy-Item config.example.json config.json   # 按需修改代理等
-npm run dev        # 后端 API http://127.0.0.1:5176
+npm run dev        # 后端 API http://127.0.0.1:30041
 npm run dev:web    # 前端开发界面 http://localhost:5175（代理 /api）
-# 或生产模式：npm run build:web 后只跑 npm run dev，直接访问 5176
+# 或生产模式：npm run build:web 后只跑 npm run dev，直接访问 30041
 ```
 
 ## 使用流程
