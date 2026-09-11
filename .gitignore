@@ -4,6 +4,5 @@ data/
 dist/
 web/dist/
 *.local
-config.json
 
 *.log
