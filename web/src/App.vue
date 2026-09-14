@@ -361,6 +361,18 @@ async function testLike() {
   catch (e) { likeErr.value = e instanceof Error ? e.message : String(e); }
   finally { likeTesting.value = false; }
 }
+// 分享页链接（公开访问，无需进后台）
+const likeShareUrl = window.location.origin + '/like';
+const likeShareMsg = ref('');
+async function copyLikeLink() {
+  try {
+    await navigator.clipboard.writeText(likeShareUrl);
+    likeShareMsg.value = '✓ 已复制';
+    window.setTimeout(() => { likeShareMsg.value = ''; }, 2000);
+  } catch {
+    likeShareMsg.value = '复制失败，请手动复制'; // 非安全上下文（http://IP 直连）时剪贴板 API 不可用
+  }
+}
 
 function fmtBytes(n: number): string {
   if (n >= 1 << 30) return (n / (1 << 30)).toFixed(1) + ' GB';
@@ -793,6 +805,13 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
 { "score": 0.83, "like": true, "model_version": 7 }
 
 // 错误码：400 格式不支持/动图/缺参数 · 409 模型未训练 · 413 超 20MB · 422 无法解码</pre>
+          <div class="like-share">
+            <span>分享链接：</span><code>{{ likeShareUrl }}</code>
+            <button @click="copyLikeLink">复制</button>
+            <a :href="likeShareUrl" target="_blank">打开 ↗</a>
+            <span v-if="likeShareMsg" class="c-ok">{{ likeShareMsg }}</span>
+          </div>
+          <p class="lb-hint">把这个链接发给朋友，对方无需进入后台就能上传图片、看你的模型喜不喜欢它。链接无鉴权，只在可信网络内分享。</p>
           <div class="like-test">
             <input type="file" accept="image/jpeg,image/png,image/webp" @change="onLikeFile">
             <button :disabled="!likeFile || likeTesting" @click="testLike">{{ likeTesting ? '预测中…' : '试试看' }}</button>
@@ -937,6 +956,10 @@ th, td { border-bottom: 1px solid #2a2d34; padding: 6px 8px; text-align: left; }
 .doc-resp { background: #14161a; border: 1px solid #2a2d34; border-radius: 6px; padding: 8px 10px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; color: #a7f3c9; }
 .doc-notes { font-size: 12px; color: #888; margin: 6px 0 2px; }
 .like-test { display: flex; gap: 8px; align-items: center; margin: 12px 0; flex-wrap: wrap; }
+.like-share { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0 4px; font-size: 13px; }
+.like-share code { color: #7ab3ff; word-break: break-all; }
+.like-share button { background: #23262d; color: #ccc; border: 1px solid #333; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.like-share a { color: #7ab3ff; text-decoration: none; }
 .like-test input[type=file] { color: #999; font-size: 13px; max-width: 100%; }
 .like-test button { background: #3b82f6; border: none; color: #fff; padding: 8px 18px; border-radius: 6px; cursor: pointer; }
 .like-test button:disabled { opacity: .4; cursor: not-allowed; }

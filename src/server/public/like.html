@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>我喜欢这个图片！</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: #14161a; color: #e6e6e6; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 24px 12px; }
+  .card { width: 100%; max-width: 480px; }
+  h1 { font-size: 20px; text-align: center; margin: 12px 0 4px; }
+  .sub { text-align: center; color: #888; font-size: 13px; margin-bottom: 20px; }
+  .drop { border: 2px dashed #333; border-radius: 12px; padding: 32px 16px; text-align: center; color: #9ba1a6; cursor: pointer; transition: border-color .15s; background: #1d2026; }
+  .drop:hover, .drop.over { border-color: #3b82f6; color: #e6e6e6; }
+  .drop input { display: none; }
+  .drop p { margin: 6px 0; font-size: 14px; }
+  .drop .hint { font-size: 12px; color: #666; }
+  .preview { margin: 16px 0; text-align: center; display: none; }
+  .preview img { max-width: 100%; max-height: 50vh; border-radius: 8px; }
+  .go { width: 100%; margin-top: 16px; background: #3b82f6; border: none; color: #fff; padding: 14px; border-radius: 8px; font-size: 16px; cursor: pointer; }
+  .go:disabled { opacity: .4; cursor: not-allowed; }
+  .result { margin-top: 20px; text-align: center; display: none; }
+  .badge { display: inline-block; padding: 8px 24px; border-radius: 999px; font-weight: 600; font-size: 18px; }
+  .like { background: #1f6f43; color: #a7f3c9; }
+  .nope { background: #4a2326; color: #f3a7a7; }
+  .score { margin-top: 8px; color: #999; font-size: 13px; }
+  .err { margin-top: 16px; text-align: center; color: #f3a7a7; font-size: 14px; display: none; }
+  .spin { color: #7ab3ff; animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .45; } }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>我喜欢这个图片！</h1>
+  <p class="sub">上传一张图片，AI 按主人的口味打分</p>
+
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept="image/jpeg,image/png,image/webp">
+    <p id="dropText">📷 点这里选择图片</p>
+    <p class="hint">或把图片拖进来 · 静态 jpg / png / webp · ≤20MB</p>
+  </label>
+
+  <div class="preview" id="preview"><img id="previewImg" alt=""></div>
+
+  <button class="go" id="go" disabled>提交，看看喜不喜欢</button>
+
+  <div class="result" id="result">
+    <span class="badge" id="badge"></span>
+    <p class="score" id="scoreText"></p>
+  </div>
+  <p class="err" id="err"></p>
+</div>
+
+<script>
+const fileInput = document.getElementById('file');
+const drop = document.getElementById('drop');
+const dropText = document.getElementById('dropText');
+const preview = document.getElementById('preview');
+const previewImg = document.getElementById('previewImg');
+const go = document.getElementById('go');
+const result = document.getElementById('result');
+const badge = document.getElementById('badge');
+const scoreText = document.getElementById('scoreText');
+const err = document.getElementById('err');
+
+let file = null;
+let previewUrl = '';
+
+function pick(f) {
+  file = f || null;
+  err.style.display = 'none';
+  result.style.display = 'none';
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  if (file) {
+    previewUrl = URL.createObjectURL(file);
+    previewImg.src = previewUrl;
+    preview.style.display = 'block';
+    dropText.textContent = file.name;
+    go.disabled = false;
+  } else {
+    preview.style.display = 'none';
+    dropText.textContent = '📷 点这里选择图片';
+    go.disabled = true;
+  }
+}
+
+fileInput.addEventListener('change', () => pick(fileInput.files[0]));
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => {
+  e.preventDefault();
+  drop.classList.remove('over');
+  if (e.dataTransfer.files.length) pick(e.dataTransfer.files[0]);
+});
+
+go.addEventListener('click', async () => {
+  if (!file || go.disabled) return;
+  go.disabled = true;
+  go.textContent = '预测中…';
+  go.classList.add('spin');
+  err.style.display = 'none';
+  result.style.display = 'none';
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch('/api/like', { method: 'POST', body: fd });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    badge.textContent = data.like ? '♥ 喜欢！' : '✕ 不太喜欢';
+    badge.className = 'badge ' + (data.like ? 'like' : 'nope');
+    scoreText.textContent = '喜欢概率 ' + (data.score * 100).toFixed(1) + '% · 模型 v' + data.model_version;
+    result.style.display = 'block';
+  } catch (e) {
+    err.textContent = '✕ ' + (e.message || e);
+    err.style.display = 'block';
+  } finally {
+    go.disabled = false;
+    go.textContent = '提交，看看喜不喜欢';
+    go.classList.remove('spin');
+  }
+});
+</script>
+</body>
+</html>

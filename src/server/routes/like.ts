@@ -52,6 +52,15 @@ export function likeRoutes(app: FastifyInstance) {
   // 内置 API 文档（设置页「API → 接口文档」渲染源）
   app.get('/api/docs', async () => apiDocs);
 
+  // 「我喜欢这个图片！」公开分享页（自包含 HTML，无需登录；每次请求读盘，改 html 不用重启）
+  const likePagePath = path.resolve(process.cwd(), 'src/server/public/like.html');
+  app.get('/like', async (_req, reply) => {
+    if (!fs.existsSync(likePagePath)) return reply.code(404).send({ error: '页面不存在' });
+    reply.header('Content-Type', 'text/html; charset=utf-8');
+    reply.header('Cache-Control', 'no-cache, must-revalidate');
+    return reply.send(fs.createReadStream(likePagePath));
+  });
+
   // 「我喜欢这个图片！」：multipart 文件上传 或 JSON base64；纯计算不留痕，临时文件算完即删
   app.post('/api/like', { bodyLimit: Math.ceil(MAX_BYTES * 1.5) }, async (req, reply) => {
     let buf: Buffer;

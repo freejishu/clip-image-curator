@@ -1,7 +1,7 @@
 /**
  * 内置 API 文档数据（设置页「API → 接口文档」渲染源）。
  * ⚠️ 新增/修改路由时必须同步更新本文件 —— 这是人工维护的文档，不是自动生成的。
- * 最后同步：feat/api-page（35 个接口）
+ * 最后同步：feat/like-share-page（36 个接口）
  */
 
 export interface ApiDocParam {
@@ -313,6 +313,12 @@ export const apiDocs: ApiDocGroup[] = [
         method: 'GET', path: '/api/docs',
         desc: '本文档的 JSON 数据源（设置页「API → 接口文档」渲染用）',
         response: `[{ "name": "分组名", "desc": "…", "endpoints": [{ "method": "GET", "path": "/api/…", "desc": "…", "params": […], "response": "…", "notes": "…" }] }]`,
+      },
+      {
+        method: 'GET', path: '/like',
+        desc: '「我喜欢这个图片！」公开分享页：自包含 HTML 页面，访问者无需进入管理后台即可上传图片并获得预测结果（内部调用 POST /api/like）',
+        response: 'text/html 页面',
+        notes: '无需鉴权；分享给谁谁能用，注意只在可信网络内分享',
       },
     ],
   },
