@@ -1,7 +1,7 @@
 /**
  * 内置 API 文档数据（设置页「API → 接口文档」渲染源）。
  * ⚠️ 新增/修改路由时必须同步更新本文件 —— 这是人工维护的文档，不是自动生成的。
- * 最后同步：feat/like-share-page（36 个接口）
+ * 最后同步：feat/auth（41 个接口）
  */
 
 export interface ApiDocParam {
@@ -30,6 +30,53 @@ export interface ApiDocGroup {
 }
 
 export const apiDocs: ApiDocGroup[] = [
+  {
+    name: '账户与鉴权',
+    desc: '除本组 login/status 及「外置接口」组标注公开的接口外，所有 /api/* 都需要鉴权：请求头 Authorization: Bearer <token>；图片等无法带请求头的场景可用 ?token=<token> query 参数代替。token 由 login 获取，服务端有效期 180 天（前端「记住我」不勾选时浏览器关闭即丢弃）',
+    endpoints: [
+      {
+        method: 'POST', path: '/api/auth/login',
+        desc: '登录获取 token（公开，无需鉴权）。同一 IP 连续失败 5 次锁定 1 分钟',
+        params: [
+          { name: 'username', in: 'body', type: 'string', required: true, desc: '账户名（初始默认 admin）' },
+          { name: 'password', in: 'body', type: 'string', required: true, desc: '密码（初始默认 admin）' },
+          { name: 'remember', in: 'body', type: 'boolean', desc: '记住我：前端据此把 token 存 localStorage（180 天）；不存 sessionStorage 浏览器关即失效' },
+        ],
+        response: `{ "token": "…", "username": "admin", "remember_days": 180 }`,
+        notes: '401 用户名或密码错误；429 锁定中',
+      },
+      {
+        method: 'GET', path: '/api/auth/status',
+        desc: '查询当前 token 是否有效（公开，永远返回 200，前端启动时校验本地 token 用）',
+        response: `{ "authenticated": true, "username": "admin" }  或  { "authenticated": false }`,
+      },
+      {
+        method: 'POST', path: '/api/auth/logout',
+        desc: '登出：删除当前 token 对应的服务端 session',
+        response: `{ "ok": true }`,
+      },
+      {
+        method: 'PUT', path: '/api/auth/username',
+        desc: '修改账户名（已有登录态保留并同步改名）',
+        params: [
+          { name: 'current_password', in: 'body', type: 'string', required: true, desc: '当前密码（确认身份）' },
+          { name: 'username', in: 'body', type: 'string', required: true, desc: '新账户名，最长 64 字符' },
+        ],
+        response: `{ "ok": true, "username": "新名字" }`,
+        notes: '403 当前密码错误；400 参数非法或与当前相同',
+      },
+      {
+        method: 'PUT', path: '/api/auth/password',
+        desc: '修改密码。成功后删除该账户全部 session（含当前会话），所有端强制重新登录',
+        params: [
+          { name: 'current_password', in: 'body', type: 'string', required: true, desc: '当前密码（确认身份）' },
+          { name: 'new_password', in: 'body', type: 'string', required: true, desc: '新密码，4-128 位' },
+        ],
+        response: `{ "ok": true, "relogin": true }`,
+        notes: '403 当前密码错误；400 新密码长度非法',
+      },
+    ],
+  },
   {
     name: '数据源与任务',
     desc: '抓取任务的创建、查看与生命周期控制',

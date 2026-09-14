@@ -1,6 +1,77 @@
 ﻿<script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
-import { api, type NextImage, type Task, type Stats, type StorageRow, type CompressionRule, type FormatRule, type ReprocessStatus, type ApiDocGroup, type LikeResult } from './api';
+import { api, auth, imgUrl, type NextImage, type Task, type Stats, type StorageRow, type CompressionRule, type FormatRule, type ReprocessStatus, type ApiDocGroup, type LikeResult } from './api';
+
+// ---- 登录与服务器切换 ----
+const authed = ref(false);
+const authUsername = ref(''); // 当前登录账户名（设置页账户区展示）
+const loginForm = ref({ username: '', password: '', remember: false });
+const loginErr = ref('');
+const loginBusy = ref(false);
+// 服务器选择：'' = 本服务器；localStorage「ic-servers」保存历史服务器列表（仅存浏览器）
+const serverPick = ref<string>(auth.server);
+const serverList = ref<string[]>(JSON.parse(localStorage.getItem('ic-servers') ?? '[]') as string[]);
+const newServerUrl = ref('');
+
+function saveServerList() { localStorage.setItem('ic-servers', JSON.stringify(serverList.value)); }
+function removeServer(s: string) {
+  serverList.value = serverList.value.filter(x => x !== s);
+  saveServerList();
+  if (serverPick.value === s) serverPick.value = '';
+}
+async function doLogin() {
+  if (loginBusy.value) return;
+  const target = serverPick.value === '__new' ? newServerUrl.value.trim() : serverPick.value;
+  if (serverPick.value === '__new' && !/^https?:\/\/.+/.test(target)) { loginErr.value = '服务器地址需以 http:// 或 https:// 开头'; return; }
+  loginBusy.value = true; loginErr.value = '';
+  try {
+    auth.setServer(target);
+    const r = await api.login(loginForm.value.username.trim(), loginForm.value.password, loginForm.value.remember);
+    auth.setToken(r.token, loginForm.value.remember);
+    authUsername.value = r.username;
+    // 自定义服务器登录成功后自动存进列表
+    if (auth.server && !serverList.value.includes(auth.server)) { serverList.value = [...serverList.value, auth.server]; saveServerList(); }
+    if (serverPick.value === '__new') serverPick.value = auth.server;
+    authed.value = true;
+    loginForm.value.password = '';
+    await boot();
+  } catch (e) {
+    loginErr.value = e instanceof Error ? e.message : String(e);
+  } finally { loginBusy.value = false; }
+}
+async function doLogout() {
+  try { await api.logout(); } catch { /* token 可能已失效，无所谓 */ }
+  auth.clear();
+  location.reload(); // 全量重置页面状态与定时器
+}
+
+// ---- 设置：账户 ----
+const acctUserForm = ref({ username: '', password: '' });
+const acctPwForm = ref({ current: '', next: '', confirm: '' });
+const acctMsg = ref('');
+const acctBusy = ref(false);
+async function saveUsername() {
+  if (acctBusy.value) return;
+  acctBusy.value = true; acctMsg.value = '';
+  try {
+    const r = await api.changeUsername(acctUserForm.value.password, acctUserForm.value.username);
+    authUsername.value = r.username;
+    acctUserForm.value = { username: '', password: '' };
+    acctMsg.value = '✓ 账户名已修改';
+  } catch (e) { acctMsg.value = `✕ ${e instanceof Error ? e.message : String(e)}`; }
+  finally { acctBusy.value = false; }
+}
+async function savePassword() {
+  if (acctBusy.value) return;
+  if (acctPwForm.value.next !== acctPwForm.value.confirm) { acctMsg.value = '✕ 两次输入的新密码不一致'; return; }
+  acctBusy.value = true; acctMsg.value = '';
+  try {
+    await api.changePassword(acctPwForm.value.current, acctPwForm.value.next);
+    alert('密码已修改，所有设备需重新登录');
+    auth.clear();
+    location.reload();
+  } catch (e) { acctMsg.value = `✕ ${e instanceof Error ? e.message : String(e)}`; acctBusy.value = false; }
+}
 
 type Tab = 'rate' | 'review' | 'album' | 'tasks' | 'settings';
 type SettingsTab = 'base' | 'model' | 'storage' | 'api';
@@ -43,6 +114,7 @@ async function label(label_: string) {
 const likeToast = ref('');
 
 function onKey(e: KeyboardEvent) {
+  if (!authed.value) return;
   if (e.key === 'Escape' && lightbox.value) { lightbox.value = null; return; }
   if (lightbox.value && e.key === 'ArrowLeft') { lbGo(-1); return; }
   if (lightbox.value && e.key === 'ArrowRight') { lbGo(1); return; }
@@ -315,7 +387,7 @@ async function restartNow() {
   api.restart().catch(() => { /* 进程退出可能截断响应，正常 */ }); // 不回等，直接开始轮询
   const timer = window.setInterval(async () => {
     try {
-      const r = await fetch('/api/stats');
+      const r = await fetch(imgUrl('/api/stats')); // imgUrl 会带上 apiBase 与 token query
       if (r.ok) { window.clearInterval(timer); location.reload(); }
     } catch { /* 还没起来，继续等 */ }
   }, 1000);
@@ -458,11 +530,21 @@ async function relabel(id: number, label_: string) {
   await Promise.all([refreshReview(), refreshAlbum()]);
 }
 
-onMounted(async () => {
-  window.addEventListener('keydown', onKey);
+/** 登录成功后的数据引导（原 onMounted 内容拆分出来，登录页不应提前打 API） */
+async function boot() {
   sources.value = await api.sources();
   await Promise.all([loadNext(), refreshTasks(), refreshModel(), refreshReview(), refreshAlbum()]);
   if (tab.value === 'tasks') taskTimer = window.setInterval(refreshTasks, 2000); // 直接落在任务页时 watch 不触发，需手动补开定时器
+}
+onMounted(async () => {
+  window.addEventListener('keydown', onKey);
+  auth.onUnauthorized(() => { authed.value = false; }); // 任何 API 401 → 回登录页
+  if (!auth.token) return; // 无 token，显示登录页
+  try {
+    const s = await api.authStatus();
+    if (s.authenticated) { authed.value = true; authUsername.value = s.username ?? ''; await boot(); return; }
+  } catch { /* 服务器不可达，按未登录处理 */ }
+  auth.clear();
 });
 type LbImage = NextImage & { user_label?: string | null; parent_id?: number | null; labeled_at?: string | null; in_manual?: boolean; is_cover?: boolean };
 interface LightboxState { items: LbImage[]; mainIdx: number; peekIdx: number; frames: LbImage[][]; frameIdx: number }
@@ -514,7 +596,41 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
 </script>
 
 <template>
-  <div class="app">
+  <!-- 登录页（未鉴权时整页替换；服务器列表仅存浏览器 localStorage） -->
+  <div v-if="!authed" class="login-wrap">
+    <form class="login-box" @submit.prevent="doLogin">
+      <h1>image-curator</h1>
+      <label class="login-row">
+        <span>服务器</span>
+        <select v-model="serverPick">
+          <option value="">本服务器（当前）</option>
+          <option v-for="s in serverList" :key="s" :value="s">{{ s }}</option>
+          <option value="__new">＋ 新服务器…</option>
+        </select>
+      </label>
+      <div v-if="serverPick === '__new'" class="login-row">
+        <span></span>
+        <input v-model="newServerUrl" placeholder="http://192.168.x.x:30041" autocapitalize="off" autocorrect="off">
+      </div>
+      <div v-if="serverPick && serverPick !== '__new'" class="login-row login-svr-op">
+        <span></span>
+        <button type="button" class="login-svr-del" @click="removeServer(serverPick)">从列表删除该服务器</button>
+      </div>
+      <label class="login-row">
+        <span>账户</span>
+        <input v-model="loginForm.username" autocomplete="username" autocapitalize="off" placeholder="admin">
+      </label>
+      <label class="login-row">
+        <span>密码</span>
+        <input v-model="loginForm.password" type="password" autocomplete="current-password" placeholder="admin">
+      </label>
+      <label class="login-remember"><input type="checkbox" v-model="loginForm.remember"> 记住我（180 天免登录；不勾选则关闭浏览器后需重新登录）</label>
+      <button class="login-btn" type="submit" :disabled="loginBusy || !loginForm.username || !loginForm.password">{{ loginBusy ? '登录中…' : '登 录' }}</button>
+      <p v-if="loginErr" class="c-dislike login-err">✕ {{ loginErr }}</p>
+    </form>
+  </div>
+
+  <div v-else class="app">
     <header>
       <h1>image-curator</h1>
       <nav class="menu">
@@ -537,7 +653,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       </div>
       <div v-if="allDone" class="empty">🎉 全部标注完成</div>
       <div v-else-if="current" class="stage">
-        <img :src="`/api/images/${current.id}/file`" :key="current.id" alt="">
+        <img :src="imgUrl(`/api/images/${current.id}/file`)" :key="current.id" alt="">
         <div class="meta">
           <a :href="current.page_url" target="_blank">{{ current.source }} #{{ current.source_id }}</a>
           <div class="tags">{{ current.tags.slice(0, 12).join(' ') }}</div>
@@ -565,7 +681,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       </div>
       <div class="grid">
         <figure v-for="(img, ri) in reviewList" :key="img.id">
-          <img :src="`/api/images/${img.id}/thumb`" loading="lazy" alt="" style="cursor:zoom-in" @click="openLightbox([img], 0, reviewList.map(x => [x]), ri)">
+          <img :src="imgUrl(`/api/images/${img.id}/thumb`)" loading="lazy" alt="" style="cursor:zoom-in" @click="openLightbox([img], 0, reviewList.map(x => [x]), ri)">
           <figcaption>
             <span v-if="img.pred_score != null">{{ img.pred_score.toFixed(2) }}</span>
             <span class="lbl">{{ img.user_label ?? '未标注' }}</span>
@@ -592,7 +708,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       </div>
       <div class="grid">
         <figure v-for="(g, gi) in albumGroups" :key="g.key" class="stack" :class="{ 'bind-sel': bindMode && bindSel.has(g.items[0].id) }">
-          <img :src="`/api/images/${g.items[0].id}/thumb`" loading="lazy" alt="" class="shown" style="cursor:zoom-in" @click="albumCardClick(g, gi)">
+          <img :src="imgUrl(`/api/images/${g.items[0].id}/thumb`)" loading="lazy" alt="" class="shown" style="cursor:zoom-in" @click="albumCardClick(g, gi)">
           <span v-if="g.items.length > 1" class="layers">⇄ {{ g.items.length }}</span>
         </figure>
       </div>
@@ -665,6 +781,34 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
           <button class="restart-btn" @click="restartNow">🔄 立即重启生效</button>
         </div>
         <div v-if="restarting" class="running">⏳ 服务重启中，恢复后自动刷新页面…</div>
+
+        <h3 style="margin-top:24px">账户</h3>
+        <p class="lb-hint">
+          当前登录：<b class="acct-name">{{ authUsername }}</b>
+          <template v-if="auth.server">（服务器：{{ auth.server }}）</template>
+          <template v-else>（本服务器）</template>
+          。修改账户名/密码均需输入当前密码确认；修改密码后所有设备需重新登录。
+          忘记密码：在服务器上停止服务后执行 <code>npm run reset-password</code>（打包版：<code>image-curator.exe reset-password</code>），重启后恢复默认 admin/admin。
+        </p>
+        <div class="acct-grid">
+          <div class="store-panel">
+            <h3>修改账户名</h3>
+            <label class="store-row">新账户名：<input v-model="acctUserForm.username" class="acct-input" autocapitalize="off"></label>
+            <label class="store-row">当前密码：<input v-model="acctUserForm.password" type="password" class="acct-input" autocomplete="current-password"></label>
+            <div class="store-ops"><button :disabled="acctBusy || !acctUserForm.username.trim() || !acctUserForm.password" @click="saveUsername">保存账户名</button></div>
+          </div>
+          <div class="store-panel">
+            <h3>修改密码</h3>
+            <label class="store-row">当前密码：<input v-model="acctPwForm.current" type="password" class="acct-input" autocomplete="current-password"></label>
+            <label class="store-row">新密码：<input v-model="acctPwForm.next" type="password" class="acct-input" autocomplete="new-password"></label>
+            <label class="store-row">确认新密码：<input v-model="acctPwForm.confirm" type="password" class="acct-input" autocomplete="new-password"></label>
+            <div class="store-ops"><button :disabled="acctBusy || !acctPwForm.current || !acctPwForm.next" @click="savePassword">修改密码</button></div>
+          </div>
+        </div>
+        <div class="store-ops" style="margin-top:10px">
+          <button class="restart-btn" @click="doLogout">退出登录</button>
+          <span v-if="acctMsg" :class="acctMsg.startsWith('✕') ? 'c-dislike' : 'c-ok'">{{ acctMsg }}</span>
+        </div>
       </div>
 
       <!-- 模型与偏好 -->
@@ -832,8 +976,8 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
     <div v-if="lightbox" class="lightbox" @click="lightbox = null">
       <div class="lb-stage" @click.stop
            @pointermove="lensMove" @pointerdown="lensMove" @pointerup="lensEnd" @pointerleave="lensEnd">
-        <img class="lb-main" :src="`/api/images/${lbMain().id}/file`" alt="" draggable="false">
-        <img v-if="lightbox.items.length > 1" class="lb-peek" :src="`/api/images/${lbPeek().id}/file`" alt="" draggable="false"
+        <img class="lb-main" :src="imgUrl(`/api/images/${lbMain().id}/file`)" alt="" draggable="false">
+        <img v-if="lightbox.items.length > 1" class="lb-peek" :src="imgUrl(`/api/images/${lbPeek().id}/file`)" alt="" draggable="false"
              :style="{ clipPath: lens.on ? `circle(${lensR}px at ${lens.x}px ${lens.y}px)` : 'circle(0px at 0px 0px)' }">
         <div v-if="lightbox.items.length > 1 && lens.on" class="lb-dim"
              :style="{ WebkitMaskImage: `radial-gradient(circle ${lensR}px at ${lens.x}px ${lens.y}px, transparent 96%, black 99%)`, maskImage: `radial-gradient(circle ${lensR}px at ${lens.x}px ${lens.y}px, transparent 96%, black 99%)` }"></div>
@@ -1009,6 +1153,29 @@ figure.stack.bind-sel::after { content: '✓'; position: absolute; left: 4px; to
 .lb-bar a { color: #7ab3ff; }
 .lb-hint { color: #666; font-size: 12px; }
 .lb-frame-no { color: #888; font-size: 12px; }
+/* 登录页 */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.login-box { width: 100%; max-width: 380px; background: #1d2026; border: 1px solid #2a2d34; border-radius: 12px; padding: 28px 24px; display: flex; flex-direction: column; gap: 14px; }
+.login-box h1 { text-align: center; margin-bottom: 6px; }
+.login-row { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.login-row > span { width: 52px; flex-shrink: 0; color: #9ba1a6; text-align: right; }
+.login-row input, .login-row select { flex: 1; min-width: 0; background: #14161a; border: 1px solid #333; color: #eee; padding: 9px 10px; border-radius: 6px; font-size: 14px; }
+.login-svr-op { margin-top: -8px; }
+.login-svr-del { background: transparent; border: none; color: #9ba1a6; font-size: 12px; cursor: pointer; text-decoration: underline; padding: 0; }
+.login-svr-del:hover { color: #f3a7a7; }
+.login-remember { font-size: 13px; color: #9ba1a6; display: flex; gap: 8px; align-items: flex-start; line-height: 1.5; }
+.login-remember input { margin-top: 3px; }
+.login-btn { background: #3b82f6; border: none; color: #fff; padding: 11px; border-radius: 8px; font-size: 15px; cursor: pointer; }
+.login-btn:disabled { opacity: .4; cursor: not-allowed; }
+.login-err { margin: 0; font-size: 13px; text-align: center; }
+/* 设置页账户区 */
+.acct-name { color: #7ab3ff; }
+.acct-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
+.acct-input { background: #14161a; border: 1px solid #333; color: #eee; padding: 6px 8px; border-radius: 4px; width: 220px; max-width: 100%; }
+@media (max-width: 640px) {
+  .acct-grid { grid-template-columns: 1fr; }
+  .acct-input { width: 100%; }
+}
 /* 移动端灯箱工具栏紧凑化：藏提示文字与选择器标签，缩小按钮 */
 @media (max-width: 640px) {
   .lb-bar { gap: 6px; padding: 6px 10px; }

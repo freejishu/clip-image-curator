@@ -11,8 +11,48 @@ import { trainRoutes } from './routes/train.js';
 import { settingsRoutes } from './routes/settings.js';
 import { storageRoutes } from './routes/storages.js';
 import { likeRoutes } from './routes/like.js';
+import { authRoutes } from './routes/auth.js';
+import { ensureAuthSeed, resetAuth, validateToken, extractToken } from './auth.js';
+
+// CLI 子命令：强制重置账户为默认 admin/admin（打包成单文件后同样适用：image-curator.exe reset-password）
+// ⚠️ 推荐在服务停止时执行；实测 WAL 空闲时服务运行中也能成功，但若报 SQLITE_BUSY 请先停服务再执行。
+//    重置后需重启服务（ensureAuthSeed 在启动时重播种 admin/admin），重置即刻生效：所有已发 token 立即失效
+if (process.argv[2] === 'reset-password') {
+  try {
+    resetAuth();
+    console.log('✓ 已清除账户凭据与全部登录态。下次启动服务时将重新初始化默认账户 admin/admin');
+  } catch (e) {
+    console.error(`✕ 重置失败: ${e instanceof Error ? e.message : String(e)}`);
+    console.error('  若提示数据库被锁定（SQLITE_BUSY），请先停止正在运行的 image-curator 服务再执行本命令');
+    process.exitCode = 1;
+  }
+  process.exit();
+}
+
+ensureAuthSeed();
 
 const app = Fastify({ logger: true });
+
+// 豁免鉴权的路径（仅 /api/* 参与判定；静态页面与 /like 本来就不要求登录）
+const AUTH_EXEMPT = new Set(['/api/auth/login', '/api/auth/status', '/api/like']);
+
+app.addHook('onRequest', async (req, reply) => {
+  const url = req.url.split('?')[0];
+  // CORS：支持「前端连其他服务器」场景（Bearer token 方案无 Cookie，不涉及 credentials，可放心 *）
+  if (url.startsWith('/api/')) {
+    reply.header('Access-Control-Allow-Origin', '*');
+    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  }
+  if (req.method === 'OPTIONS') return reply.code(204).send(); // 预检放行
+  if (!url.startsWith('/api/')) return; // 静态资源与 /like 公开
+  if (AUTH_EXEMPT.has(url)) return;
+  const token = extractToken(req);
+  const username = validateToken(token);
+  if (!username) return reply.code(401).send({ error: 'unauthorized' });
+  req.authUser = username;
+  req.authToken = token;
+});
 
 // 收藏夹按归档规则重整理（幂等：规则变更/新增后重启即生效）
 {
@@ -45,6 +85,7 @@ trainRoutes(app);
 settingsRoutes(app);
 storageRoutes(app);
 likeRoutes(app);
+authRoutes(app);
 
 // 生产模式：托管前端构建产物
 const webDist = path.resolve(process.cwd(), 'web/dist');
