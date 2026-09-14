@@ -1,0 +1,121 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '22'
+  # 打进发布包里的便携 Node 版本（供最终用户免装 Node 直接运行）
+  BUNDLED_NODE_VERSION: '22.14.0'
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win-x64
+            node_dist: win-x64.zip
+          - os: ubuntu-latest
+            platform: linux-x64
+            node_dist: linux-x64.tar.xz
+          - os: macos-latest
+            platform: macos-arm64
+            node_dist: darwin-arm64.tar.gz
+          # 如需 Intel Mac 包，追加一行（node_dist: darwin-x64.tar.gz, os: macos-13, platform: macos-x64）
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build web frontend
+        run: npm run build:web
+
+      - name: Prune dev dependencies
+        run: npm prune --omit=dev
+
+      - name: Assemble package
+        shell: bash
+        run: |
+          set -e
+          PKG="image-curator-${{ github.ref_name }}-${{ matrix.platform }}"
+          mkdir -p "$PKG"
+          cp -r src package.json config.example.json LICENSE README.md docs "$PKG/"
+          mkdir -p "$PKG/web"
+          cp -r web/dist "$PKG/web/dist"
+          cp -r node_modules "$PKG/node_modules"
+          echo "PKG=$PKG" >> "$GITHUB_ENV"
+
+      - name: Bundle portable Node.js (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $V = "v${{ env.BUNDLED_NODE_VERSION }}"
+          Invoke-WebRequest "https://nodejs.org/dist/$V/node-$V-${{ matrix.node_dist }}" -OutFile node-dist.zip
+          Expand-Archive node-dist.zip -DestinationPath .node-tmp
+          New-Item -ItemType Directory -Force "$env:PKG/.runtime/node" | Out-Null
+          Copy-Item -Recurse ".node-tmp/*/*" "$env:PKG/.runtime/node/"
+
+      - name: Bundle portable Node.js (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          set -e
+          V="v${{ env.BUNDLED_NODE_VERSION }}"
+          curl -fSL "https://nodejs.org/dist/$V/node-$V-${{ matrix.node_dist }}" -o node-dist
+          mkdir -p "$PKG/.runtime/node"
+          case "${{ matrix.node_dist }}" in
+            *.tar.xz) tar -xJf node-dist -C "$PKG/.runtime/node" --strip-components=1 ;;
+            *.tar.gz) tar -xzf node-dist -C "$PKG/.runtime/node" --strip-components=1 ;;
+          esac
+
+      - name: Add start scripts
+        shell: bash
+        run: |
+          set -e
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp start.bat "$PKG/start.bat"
+          else
+            cat > "$PKG/start.sh" <<'EOF'
+          #!/bin/sh
+          cd "$(dirname "$0")"
+          export PATH="$PWD/.runtime/node/bin:$PATH"
+          echo "Starting image-curator ... open http://127.0.0.1:30041"
+          exec "$PWD/.runtime/node/bin/npx" tsx src/server/index.ts
+          EOF
+            chmod +x "$PKG/start.sh"
+          fi
+
+      - name: Create archive (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: 7z a "image-curator-${{ github.ref_name }}-${{ matrix.platform }}.zip" "$PKG"
+
+      - name: Create archive (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: tar -czf "image-curator-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz" "$PKG"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: image-curator-${{ github.ref_name }}-${{ matrix.platform }}.*
+          generate_release_notes: true

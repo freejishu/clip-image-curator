@@ -113,10 +113,10 @@ export function settingsRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // 重启自身：延迟 2s 由独立进程重新拉起 启动.bat，然后退出当前进程
+  // 重启自身：延迟 2s 由独立进程重新拉起 start.bat，然后退出当前进程
   app.post('/api/restart', async () => {
     const cwd = process.cwd().replace(/'/g, "''");
-    const ps = `Start-Sleep -Seconds 2; Start-Process -FilePath cmd.exe -ArgumentList '/c','启动.bat' -WorkingDirectory '${cwd}'`;
+    const ps = `Start-Sleep -Seconds 2; Start-Process -FilePath cmd.exe -ArgumentList '/c','start.bat' -WorkingDirectory '${cwd}'`;
     spawn('powershell.exe', ['-NoProfile', '-Command', ps], { detached: true, stdio: 'ignore' }).unref();
     setTimeout(() => process.exit(0), 1000); // 留足响应发送时间，过快 exit 会把客户端连接掐断
     return { ok: true };

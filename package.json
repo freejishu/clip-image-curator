@@ -2,6 +2,7 @@
   "name": "image-curator",
   "version": "2.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server/index.ts",
@@ -19,12 +20,12 @@
     "https-proxy-agent": "^7.0.6",
     "p-queue": "^8.0.1",
     "sharp": "^0.35.4",
-    "socks-proxy-agent": "^8.0.5"
+    "socks-proxy-agent": "^8.0.5",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@vitejs/plugin-vue": "^5.2.1",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^6.0.7",
     "vue": "^3.5.13"

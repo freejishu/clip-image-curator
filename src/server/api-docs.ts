@@ -289,7 +289,7 @@ export const apiDocs: ApiDocGroup[] = [
       },
       {
         method: 'POST', path: '/api/restart',
-        desc: '重启服务：延迟 2s 由独立进程重新拉起 启动.bat，当前进程退出',
+        desc: '重启服务：延迟 2s 由独立进程重新拉起 start.bat，当前进程退出',
         response: `{ "ok": true }`,
         notes: '进程退出可能截断连接，调用方应轮询等待恢复',
       },

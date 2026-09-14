@@ -29,6 +29,17 @@
 
 ## 快速开始
 
+### 方式一：下载预打包版本（推荐，无需安装 Node）
+
+从 [Releases](../../releases) 下载对应平台的压缩包（Windows / Linux / macOS），解压后：
+
+- Windows：双击 `start.bat`
+- Linux / macOS：`./start.sh`
+
+包内已自带便携 Node.js 22 和全部依赖，解压即可运行（不建 `config.json` 时自动按 `config.example.json` 的默认值跑，需要改配置就复制一份再改）。访问 http://127.0.0.1:30041 。
+
+### 方式二：源码运行
+
 ```bash
 npm install
 cp config.example.json config.json   # Windows: Copy-Item config.example.json config.json
@@ -49,7 +60,7 @@ npm run build:web  # 构建前端到 web/dist
 npm run dev        # 只跑这一个即可
 ```
 
-Windows 用户也可以直接双击 `启动.bat`（会自动注入项目自带便携 Node 的 PATH 并打开浏览器）。
+Windows 用户也可以直接双击 `start.bat`（会自动注入项目自带便携 Node 的 PATH 并打开浏览器）。
 
 首次访问用默认账户 **admin / admin** 登录，登录后请立即在「设置 → 基础设置 → 账户」修改密码。忘记密码：停止服务后执行 `npm run reset-password`，重启后恢复默认账户。
 
@@ -131,3 +142,7 @@ Windows 用户也可以直接双击 `启动.bat`（会自动注入项目自带�
 
 - 抓取的图片版权归原作者与站点所有，本工具仅供个人收藏与学习使用，请勿二次分发图片。
 - 请遵守目标站点的 robots 协议与使用条款，工具已内置礼貌限速，请勿调高并发对站点造成压力。
+
+## 许可证
+
+[MIT](LICENSE)
