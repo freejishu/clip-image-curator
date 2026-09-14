@@ -6,3 +6,7 @@ web/dist/
 *.local
 
 *.log
+
+# 个人本地配置（含个人偏好与代理设置），公开发布请使用 config.example.json 复制生成
+config.json
+

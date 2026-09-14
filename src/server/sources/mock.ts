@@ -49,7 +49,7 @@ export function makePng(seed: number): Buffer {
   ]);
 }
 
-const TAG_POOL = ['seifuku', 'skirt', 'bare_legs', 'thighhighs', 'black_thighhighs'];
+const TAG_POOL = ['seifuku', 'skirt', 'bare_legs', 'landscape', 'cat_girl'];
 
 export const mock: SourcePlugin = {
   name: 'mock',

@@ -1,8 +1,8 @@
-﻿{
+{
   "port": 30041,
   "host": "0.0.0.0",
   "dataDir": "./data",
-  "proxy": "http://127.0.0.1:12330",
+  "proxy": null,
   "trainThreshold": 100,
   "storage": {
     "type": "local",
@@ -10,14 +10,14 @@
     "favorites": "./data/favorites"
   },
   "archiveRules": [
-    { "folder": "白裤袜", "tags": ["white_pantyhose", "white_thighhighs"] }
+    { "folder": "风景", "tags": ["landscape", "scenery"] }
   ],
   "sources": {
     "yandere": { "enabled": true, "proxy": null },
     "mock": { "enabled": true }
   },
   "zeroshot": {
-    "positive": ["anime girl wearing white pantyhose tights", "anime illustration of a girl wearing white thighhighs"],
-    "negative": ["anime illustration without white legwear", "photo"]
+    "positive": ["anime illustration of a beautiful landscape", "scenery anime illustration"],
+    "negative": ["anime illustration of a character portrait", "photo"]
   }
 }
