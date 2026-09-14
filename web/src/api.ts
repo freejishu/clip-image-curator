@@ -23,6 +23,10 @@ export interface ReprocessStatus {
   running: boolean; phase: string; done: number; total: number;
   processed: number; skipped: number; failed: number; savedBytes: number; error: string;
 }
+export interface ApiDocParam { name: string; in: 'path' | 'query' | 'body'; type: string; required?: boolean; desc: string }
+export interface ApiDocEndpoint { method: string; path: string; desc: string; params?: ApiDocParam[]; response?: string; notes?: string }
+export interface ApiDocGroup { name: string; desc?: string; endpoints: ApiDocEndpoint[] }
+export interface LikeResult { score: number; like: boolean; model_version: number }
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
@@ -63,4 +67,10 @@ export const api = {
   saveFormats: (type: string, f: FormatRule) => req<{ ok: boolean }>(`/api/storages/${type}/formats`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(f) }),
   processExisting: (type: string) => req<{ ok: boolean }>(`/api/storages/${type}/process-existing`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
   processStatus: () => req<ReprocessStatus>('/api/storages/process-status'),
+  docs: () => req<ApiDocGroup[]>('/api/docs'),
+  like: (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return req<LikeResult>('/api/like', { method: 'POST', body: fd });
+  },
 };

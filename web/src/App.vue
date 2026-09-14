@@ -1,9 +1,9 @@
 ﻿<script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
-import { api, type NextImage, type Task, type Stats, type StorageRow, type CompressionRule, type FormatRule, type ReprocessStatus } from './api';
+import { api, type NextImage, type Task, type Stats, type StorageRow, type CompressionRule, type FormatRule, type ReprocessStatus, type ApiDocGroup, type LikeResult } from './api';
 
 type Tab = 'rate' | 'review' | 'album' | 'tasks' | 'settings';
-type SettingsTab = 'base' | 'model' | 'storage';
+type SettingsTab = 'base' | 'model' | 'storage' | 'api';
 const savedTabRaw = localStorage.getItem('ic-tab'); // 旧版本有 'model' 页签，并入设置
 const tab = ref<Tab>((savedTabRaw === 'model' ? 'settings' : savedTabRaw ?? 'rate') as Tab); // 刷新后回到原页面
 const settingsTab = ref<SettingsTab>(savedTabRaw === 'model' ? 'model' : 'base');
@@ -333,6 +333,35 @@ let reproTimer: number | undefined;
 
 async function loadStorages() { storages.value = await api.storages(); }
 
+// ---- 设置：API（接口文档 + 「我喜欢这个图片！」在线测试） ----
+type ApiTab = 'docs' | 'like';
+const apiTab = ref<ApiTab>('docs');
+const docGroups = ref<ApiDocGroup[]>([]);
+let docsLoaded = false;
+async function loadDocs() {
+  if (docsLoaded) return;
+  docGroups.value = await api.docs();
+  docsLoaded = true;
+}
+const likeFile = ref<File | null>(null);
+const likePreview = ref('');
+const likeResult = ref<LikeResult | null>(null);
+const likeErr = ref('');
+const likeTesting = ref(false);
+function onLikeFile(e: Event) {
+  const f = (e.target as HTMLInputElement).files?.[0] ?? null;
+  likeFile.value = f; likeResult.value = null; likeErr.value = '';
+  if (likePreview.value) URL.revokeObjectURL(likePreview.value);
+  likePreview.value = f ? URL.createObjectURL(f) : '';
+}
+async function testLike() {
+  if (!likeFile.value || likeTesting.value) return;
+  likeTesting.value = true; likeErr.value = ''; likeResult.value = null;
+  try { likeResult.value = await api.like(likeFile.value); }
+  catch (e) { likeErr.value = e instanceof Error ? e.message : String(e); }
+  finally { likeTesting.value = false; }
+}
+
 function fmtBytes(n: number): string {
   if (n >= 1 << 30) return (n / (1 << 30)).toFixed(1) + ' GB';
   if (n >= 1 << 20) return (n / (1 << 20)).toFixed(1) + ' MB';
@@ -601,6 +630,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
         <button :class="{ on: settingsTab === 'base' }" @click="settingsTab = 'base'">基础设置</button>
         <button :class="{ on: settingsTab === 'model' }" @click="settingsTab = 'model'">模型与偏好</button>
         <button :class="{ on: settingsTab === 'storage' }" @click="settingsTab = 'storage'; loadStorages()">存储设置</button>
+        <button :class="{ on: settingsTab === 'api' }" @click="settingsTab = 'api'; loadDocs()">API</button>
       </div>
 
       <!-- 基础设置：数据目录 -->
@@ -650,7 +680,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
       </template>
 
       <!-- 存储设置 -->
-      <div v-else class="settings-base">
+      <div v-else-if="settingsTab === 'storage'" class="settings-base">
         <h3>存储设置</h3>
         <p class="lb-hint">压缩与格式规则按存储类型独立配置，保存后对新下载的图片立即生效；「处理存量」按当前规则批量处理已有图片。动图（GIF / 动图 WebP）不参与转换与压缩，转换目标不可选 GIF。</p>
         <table>
@@ -715,6 +745,67 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearIn
 
         <div v-if="repro?.running" class="running">⏳ 存量处理中{{ repro.phase === 'process' ? `（${repro.done}/${repro.total}）` : '…' }}，请勿关闭页面</div>
         <span v-if="storeMsg" :class="storeMsg.startsWith('✕') ? 'c-dislike' : 'c-ok'">{{ storeMsg }}</span>
+      </div>
+
+      <!-- API（接口文档 / 我喜欢这个图片！） -->
+      <div v-else-if="settingsTab === 'api'" class="settings-base">
+        <div class="api-tabs">
+          <button :class="{ on: apiTab === 'docs' }" @click="apiTab = 'docs'">接口文档</button>
+          <button :class="{ on: apiTab === 'like' }" @click="apiTab = 'like'">我喜欢这个图片！</button>
+        </div>
+
+        <!-- 接口文档 -->
+        <div v-if="apiTab === 'docs'">
+          <p class="lb-hint">本页列出程序全部内部接口（{{ docGroups.reduce((n, g) => n + g.endpoints.length, 0) }} 个），随版本持续更新；点击分组展开。</p>
+          <details v-for="g in docGroups" :key="g.name" class="doc-group">
+            <summary><b>{{ g.name }}</b><span class="doc-count">{{ g.endpoints.length }} 个接口</span><span v-if="g.desc" class="doc-gdesc">{{ g.desc }}</span></summary>
+            <div v-for="e in g.endpoints" :key="e.method + e.path" class="doc-ep">
+              <div class="doc-head">
+                <span class="doc-method" :class="'m-' + e.method.toLowerCase()">{{ e.method }}</span>
+                <code class="doc-path">{{ e.path }}</code>
+              </div>
+              <p class="doc-desc">{{ e.desc }}</p>
+              <table v-if="e.params?.length" class="doc-params">
+                <thead><tr><th>参数</th><th>位置</th><th>类型</th><th>说明</th></tr></thead>
+                <tbody>
+                  <tr v-for="p in e.params" :key="p.name">
+                    <td>{{ p.name }}<em v-if="p.required" class="doc-req">*</em></td>
+                    <td>{{ p.in }}</td>
+                    <td><code>{{ p.type }}</code></td>
+                    <td>{{ p.desc }}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <pre v-if="e.response" class="doc-resp">{{ e.response }}</pre>
+              <p v-if="e.notes" class="doc-notes">{{ e.notes }}</p>
+            </div>
+          </details>
+        </div>
+
+        <!-- 我喜欢这个图片！ -->
+        <div v-else-if="apiTab === 'like'">
+          <h3>我喜欢这个图片！</h3>
+          <p class="lb-hint">
+            <code>POST /api/like</code> — 上传一张图片，按当前训练的模型预测喜欢概率。两种方式：multipart/form-data（字段名 <code>file</code>）或 JSON base64（字段 <code>image</code>，支持 data URL）。
+            限制：≤20MB，仅静态 jpg / png / webp（拒绝 gif 与动图）；纯计算不留痕，图片不入库、算完即删。
+          </p>
+          <pre class="doc-resp">// 返回示例（like = score ≥ 0.5）
+{ "score": 0.83, "like": true, "model_version": 7 }
+
+// 错误码：400 格式不支持/动图/缺参数 · 409 模型未训练 · 413 超 20MB · 422 无法解码</pre>
+          <div class="like-test">
+            <input type="file" accept="image/jpeg,image/png,image/webp" @change="onLikeFile">
+            <button :disabled="!likeFile || likeTesting" @click="testLike">{{ likeTesting ? '预测中…' : '试试看' }}</button>
+          </div>
+          <div v-if="likePreview" class="like-result">
+            <img :src="likePreview" alt="">
+            <div v-if="likeResult" class="like-verdict">
+              <span class="pred-badge" :class="likeResult.like ? 'pred-high' : 'pred-low'">{{ likeResult.like ? '♥ 喜欢' : '✕ 不喜欢' }}</span>
+              <span class="like-score">{{ (likeResult.score * 100).toFixed(1) }}% · 模型 v{{ likeResult.model_version }}</span>
+            </div>
+          </div>
+          <span v-if="likeErr" class="c-dislike">✕ {{ likeErr }}</span>
+        </div>
       </div>
     </section>
 
@@ -824,6 +915,34 @@ th, td { border-bottom: 1px solid #2a2d34; padding: 6px 8px; text-align: left; }
 .path-list span { display: inline-block; width: 90px; color: #888; }
 .path-list code { color: #7ab3ff; word-break: break-all; }
 .restart-btn { background: #e5484d; border: none; color: #fff; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+/* API 页：接口文档 + 我喜欢这个图片！ */
+.api-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.api-tabs button { background: #1d2026; color: #9ba1a6; border: 1px solid #2a2d34; padding: 6px 16px; border-radius: 999px; cursor: pointer; font-size: 13px; }
+.api-tabs button.on { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+.doc-group { background: #1d2026; border: 1px solid #2a2d34; border-radius: 8px; margin-bottom: 8px; }
+.doc-group summary { padding: 10px 14px; cursor: pointer; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.doc-count { color: #888; font-size: 12px; }
+.doc-gdesc { color: #666; font-size: 12px; }
+.doc-ep { border-top: 1px solid #2a2d34; padding: 10px 14px; }
+.doc-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.doc-method { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+.m-get { background: #1f6f43; color: #a7f3c9; }
+.m-post { background: #1f4e79; color: #a7d3f3; }
+.m-put { background: #6b5b1f; color: #f3e3a7; }
+.m-delete { background: #4a2326; color: #f3a7a7; }
+.doc-path { color: #7ab3ff; word-break: break-all; }
+.doc-desc { margin: 8px 0; font-size: 13px; color: #ccc; }
+.doc-params { font-size: 12px; margin: 6px 0; }
+.doc-req { color: #e5484d; font-style: normal; }
+.doc-resp { background: #14161a; border: 1px solid #2a2d34; border-radius: 6px; padding: 8px 10px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; color: #a7f3c9; }
+.doc-notes { font-size: 12px; color: #888; margin: 6px 0 2px; }
+.like-test { display: flex; gap: 8px; align-items: center; margin: 12px 0; flex-wrap: wrap; }
+.like-test input[type=file] { color: #999; font-size: 13px; max-width: 100%; }
+.like-test button { background: #3b82f6; border: none; color: #fff; padding: 8px 18px; border-radius: 6px; cursor: pointer; }
+.like-test button:disabled { opacity: .4; cursor: not-allowed; }
+.like-result img { max-width: 260px; max-height: 260px; border-radius: 8px; display: block; margin-bottom: 8px; }
+.like-verdict { display: flex; gap: 12px; align-items: center; }
+.like-score { color: #999; font-size: 13px; }
 @keyframes pulse { 50% { opacity: .45; } }
 figure.stack { position: relative; height: 150px; }
 figure.stack img { position: absolute; inset: 0; opacity: 0; transition: opacity .22s ease; cursor: zoom-in; }

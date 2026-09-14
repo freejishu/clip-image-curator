@@ -154,6 +154,13 @@ export function loadModel(): Model | null {
   return raw ? (JSON.parse(raw) as Model) : null;
 }
 
+/** 外置预测（「我喜欢这个图片！」API）：外部图片无 tags，tag one-hot 特征全 0；模型未训练返回 null */
+export function predictExternal(embedding: Float32Array): { score: number; version: number } | null {
+  const model = loadModel();
+  if (!model) return null;
+  return { score: predictWith(model, featurize(embedding, [], model.vocab, model.dim)), version: model.version };
+}
+
 /** 偏好解释：tag 特征权重排行 */
 export function tagPreferences(model: Model, top = 20): { positive: [string, number][]; negative: [string, number][] } {
   const tagWeights = model.weights.slice(model.dim).map((w, i) => [model.vocab[i], w] as [string, number]);
