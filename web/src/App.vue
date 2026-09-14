@@ -752,7 +752,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.removeE
         <select v-model="newTask.source">
           <option v-for="s in sources" :key="s.name" :value="s.name" :disabled="!s.enabled">{{ s.name }}</option>
         </select>
-        <input v-model="newTask.tags" placeholder="tags（空格分隔），如 white_thighhighs rating:s">
+        <input v-model="newTask.tags" placeholder="tags（空格分隔），如 landscape rating:s">
         <label style="white-space:nowrap"><input type="radio" value="head" v-model="newTask.mode">从头扫</label>
         <label style="white-space:nowrap"><input type="radio" value="range" v-model="newTask.mode">范围</label>
         <input v-if="newTask.mode === 'head'" v-model.number="newTask.limit" type="number" min="1" max="2000" style="width:90px" title="扫描条数">
