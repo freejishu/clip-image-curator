@@ -75,9 +75,22 @@ async function savePassword() {
 
 type Tab = 'rate' | 'review' | 'album' | 'tasks' | 'settings';
 type SettingsTab = 'base' | 'model' | 'storage' | 'api';
+
+// ---- URL 路由（无 vue-router，手写 history API）：tab 与网址互相同步，复制网址可直接打开对应页 ----
+// / → 打分，/review /album /tasks /settings（子页 /settings/model|storage|api）
+const TAB_PATHS: Record<Tab, string> = { rate: '/', review: '/review', album: '/album', tasks: '/tasks', settings: '/settings' };
+function pathToTab(p: string): { tab: Tab; settingsTab?: SettingsTab } | null {
+  const m = /^\/(review|album|tasks|settings)?(?:\/(base|model|storage|api))?\/?$/.exec(p);
+  if (!m) return null;
+  if (!m[1]) return { tab: 'rate' };
+  if (m[1] === 'settings') return { tab: 'settings', settingsTab: (m[2] ?? 'base') as SettingsTab };
+  return { tab: m[1] as Tab };
+}
+const urlTab = pathToTab(window.location.pathname); // URL 优先，裸开 / 以外路径时覆盖 localStorage 记忆
 const savedTabRaw = localStorage.getItem('ic-tab'); // 旧版本有 'model' 页签，并入设置
-const tab = ref<Tab>((savedTabRaw === 'model' ? 'settings' : savedTabRaw ?? 'rate') as Tab); // 刷新后回到原页面
-const settingsTab = ref<SettingsTab>(savedTabRaw === 'model' ? 'model' : 'base');
+const tab = ref<Tab>((urlTab?.tab ?? (savedTabRaw === 'model' ? 'settings' : savedTabRaw ?? 'rate')) as Tab); // 刷新后回到原页面
+const settingsTab = ref<SettingsTab>(urlTab?.settingsTab ?? (savedTabRaw === 'model' ? 'model' : 'base'));
+let navFromUrl = false; // popstate 引起的 tab 变化不再 pushState（避免历史记录重复）
 
 // ---- 打分 ----
 const mode = ref<'smart' | 'sequential'>('smart');
@@ -152,6 +165,10 @@ async function refreshTasks() {
 let taskTimer: number | undefined;
 watch(tab, (t) => {
   localStorage.setItem('ic-tab', t);
+  if (!navFromUrl) { // 用户点击页签 → 网址同步；popstate 来的不动历史
+    const p = t === 'settings' ? `/settings/${settingsTab.value}` : TAB_PATHS[t];
+    if (window.location.pathname !== p) window.history.pushState(null, '', p);
+  }
   window.clearInterval(taskTimer);
   if (t === 'tasks') { refreshTasks(); taskTimer = window.setInterval(refreshTasks, 2000); } // 自动拉取进度
   if (t === 'rate') loadNext(); // 回到打分页：按最新预测分重新取第一张
@@ -159,6 +176,20 @@ watch(tab, (t) => {
   if (t === 'album') refreshAlbum();
   if (t === 'settings') { refreshModel(); loadSettings(); loadStorages(); }
 });
+watch(settingsTab, (st) => {
+  if (tab.value !== 'settings' || navFromUrl) return;
+  const p = `/settings/${st}`;
+  if (window.location.pathname !== p) window.history.pushState(null, '', p);
+});
+// 浏览器前进/后退：按网址还原页签
+function onPopState() {
+  const r = pathToTab(window.location.pathname);
+  if (!r) return;
+  navFromUrl = true;
+  tab.value = r.tab;
+  if (r.settingsTab) settingsTab.value = r.settingsTab;
+  navFromUrl = false;
+}
 
 function predText(s: number | null | undefined): string {
   return s == null ? '无预测分' : `预测 ${(s * 100).toFixed(1)}%`;
@@ -538,6 +569,7 @@ async function boot() {
 }
 onMounted(async () => {
   window.addEventListener('keydown', onKey);
+  window.addEventListener('popstate', onPopState);
   auth.onUnauthorized(() => { authed.value = false; }); // 任何 API 401 → 回登录页
   if (!auth.token) return; // 无 token，显示登录页
   try {
@@ -592,7 +624,7 @@ watch(lightbox, (val) => {
   if (val) { savedScroll = window.scrollY; document.body.style.overflow = 'hidden'; }
   else { document.body.style.overflow = ''; requestAnimationFrame(() => window.scrollTo(0, savedScroll)); }
 });
-onUnmounted(() => { window.removeEventListener('keydown', onKey); window.clearInterval(pollTimer); window.clearInterval(taskTimer); window.clearInterval(migTimer); });
+onUnmounted(() => { window.removeEventListener('keydown', onKey); window.removeEventListener('popstate', onPopState); window.clearInterval(pollTimer); window.clearInterval(taskTimer); window.clearInterval(migTimer); });
 </script>
 
 <template>
