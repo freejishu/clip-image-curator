@@ -1,5 +1,5 @@
 ﻿import type { FastifyInstance } from 'fastify';
-import { train, loadModel, tagPreferences } from '../ml/classifier.js';
+import { train, loadModel, tagPreferences, exportModel, importModel } from '../ml/classifier.js';
 import { zeroshotScoreAll } from '../ml/zeroshot.js';
 
 let trainState: { status: 'idle' | 'running' | 'done' | 'error'; progress: string; result?: unknown; error?: string } =
@@ -32,5 +32,22 @@ export function trainRoutes(app: FastifyInstance) {
     if (!model) return { trained: false };
     const top = Number((req.query as { top?: string }).top ?? 20);
     return { trained: true, version: model.version, samples: model.samples, trainedAt: model.trainedAt, ...tagPreferences(model, top) };
+  });
+
+  // 模型迁移：导出为 JSON 文件 / 导入覆盖（设置页「模型与偏好」）
+  app.get('/api/model/export', async (_req, reply) => {
+    const data = exportModel();
+    if (!data) return reply.code(409).send({ error: '尚未训练模型' });
+    reply.header('Content-Disposition', `attachment; filename="model-v${data.model.version}.json"`);
+    return data;
+  });
+
+  app.post('/api/model/import', async (req, reply) => {
+    try {
+      const r = importModel(req.body);
+      return { ok: true, ...r };
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 }

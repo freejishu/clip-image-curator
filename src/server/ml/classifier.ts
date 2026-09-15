@@ -154,6 +154,41 @@ export function loadModel(): Model | null {
   return raw ? (JSON.parse(raw) as Model) : null;
 }
 
+/** 导出模型（迁移/备份用）：模型本体 + 版本号；未训练返回 null */
+export function exportModel(): { model: Model; model_version: string } | null {
+  const raw = getMeta('model');
+  if (!raw) return null;
+  const model = JSON.parse(raw) as Model;
+  return { model, model_version: getMeta('model_version') ?? String(model.version) };
+}
+
+/** 导入模型（覆盖现有模型，立即生效）：结构校验后写入 meta；数据非法抛错 */
+export function importModel(payload: unknown): { version: number; samples: number } {
+  const m = (payload as { model?: unknown } | null)?.model ?? payload;
+  const fail = (msg: string): never => { throw new Error(msg); };
+  if (!m || typeof m !== 'object') fail('不是有效的模型文件');
+  const model = m as Partial<Model>;
+  if (!Number.isFinite(model.version) || (model.version as number) <= 0) fail('缺少有效的 version');
+  if (!Number.isFinite(model.dim) || (model.dim as number) <= 0) fail('缺少有效的 dim');
+  if (!Array.isArray(model.vocab) || model.vocab.some(t => typeof t !== 'string')) fail('vocab 必须是字符串数组');
+  if (!Array.isArray(model.weights) || model.weights.some(w => typeof w !== 'number' || !Number.isFinite(w))) fail('weights 必须是数字数组');
+  if ((model.weights as number[]).length !== (model.dim as number) + (model.vocab as string[]).length)
+    fail(`weights 长度 ${(model.weights as number[]).length} 与 dim(${model.dim})+vocab(${(model.vocab as string[]).length}) 不符`);
+  if (typeof model.bias !== 'number' || !Number.isFinite(model.bias)) fail('缺少有效的 bias');
+  const normalized: Model = {
+    version: model.version as number,
+    vocab: model.vocab as string[],
+    dim: model.dim as number,
+    weights: model.weights as number[],
+    bias: model.bias as number,
+    trainedAt: typeof model.trainedAt === 'string' ? model.trainedAt : new Date().toISOString(),
+    samples: Number.isFinite(model.samples) ? (model.samples as number) : 0,
+  };
+  setMeta('model', JSON.stringify(normalized));
+  setMeta('model_version', String(normalized.version));
+  return { version: normalized.version, samples: normalized.samples };
+}
+
 /** 外置预测（「我喜欢这个图片！」API）：外部图片无 tags，tag one-hot 特征全 0；模型未训练返回 null */
 export function predictExternal(embedding: Float32Array): { score: number; version: number } | null {
   const model = loadModel();

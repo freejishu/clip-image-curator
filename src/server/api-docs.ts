@@ -256,6 +256,19 @@ export const apiDocs: ApiDocGroup[] = [
         response: `{ "trained": true, "version": 7, "samples": 500, "trainedAt": "…", "positive": [["tag", 1.23]], "negative": [["tag", -0.45]] }`,
         notes: '未训练返回 { "trained": false }',
       },
+      {
+        method: 'GET', path: '/api/model/export',
+        desc: '导出当前模型为 JSON（迁移/备份用，带 Content-Disposition 下载头）',
+        response: `{ "model": { "version": 7, "vocab": ["tag"], "dim": 512, "weights": [0.01], "bias": 0.1, "trainedAt": "…", "samples": 500 }, "model_version": "7" }`,
+        notes: '409 尚未训练模型',
+      },
+      {
+        method: 'POST', path: '/api/model/import',
+        desc: '导入模型 JSON：覆盖现有模型并立即生效（不重打分历史存量图，新抓取的图按新模型出分）',
+        params: [{ name: 'body', in: 'body', type: 'object', required: true, desc: '导出接口返回的完整 JSON（也兼容仅内层 model 对象）' }],
+        response: `{ "ok": true, "version": 7, "samples": 500 }`,
+        notes: '400 文件结构非法（weights 长度须等于 dim + vocab.length）',
+      },
     ],
   },
   {

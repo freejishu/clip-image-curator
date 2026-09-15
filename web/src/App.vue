@@ -367,6 +367,36 @@ function pollTrain() {
   }, 1500);
 }
 
+// ---- 模型导入/导出（迁移到其他实例） ----
+const modelMsg = ref('');
+const importInput = ref<HTMLInputElement | null>(null);
+async function exportModelFile() {
+  modelMsg.value = '';
+  try {
+    const data = await api.exportModel();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `model-v${data.model.version}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    modelMsg.value = `✓ 已导出模型 v${data.model.version}`;
+  } catch (e) { modelMsg.value = `✕ ${e instanceof Error ? e.message : String(e)}`; }
+}
+async function onImportFile(ev: Event) {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = ''; // 允许重复选同一文件
+  if (!file) return;
+  modelMsg.value = '';
+  try {
+    const data: unknown = JSON.parse(await file.text());
+    const r = await api.importModel(data);
+    modelMsg.value = `✓ 已导入模型 v${r.version}（${r.samples} 样本），立即生效`;
+    await refreshModel();
+  } catch (e) { modelMsg.value = `✕ ${e instanceof Error ? e.message : String(e)}`; }
+}
+
 // ---- 设置：数据目录 ----
 interface SettingsInfo { dataDir: string; incoming: string; favorites: string; thumbs: string; models: string }
 const settingsInfo = ref<SettingsInfo | null>(null);
@@ -853,6 +883,10 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.removeE
         <div class="train-box">
           <button @click="startTrain" :disabled="trainState.status === 'running' || (stats?.liked ?? 0) + (stats?.disliked ?? 0) < 10">训练模型（需 ≥10 条标注）</button>
           <button @click="startZeroshot" :disabled="trainState.status === 'running'">Zero-shot 冷启动粗筛</button>
+          <button @click="exportModelFile" :disabled="!prefs?.trained">导出模型</button>
+          <button @click="importInput?.click()">导入模型</button>
+          <input ref="importInput" type="file" accept="application/json,.json" style="display:none" @change="onImportFile">
+          <span v-if="modelMsg" :class="modelMsg.startsWith('✕') ? 'c-dislike' : 'c-ok'">{{ modelMsg }}</span>
           <span v-if="trainState.status === 'running'" class="running">⏳ {{ trainState.progress || '进行中…' }}</span>
           <span v-else-if="trainState.status === 'error'" class="c-dislike">✕ {{ trainState.error }}</span>
           <span v-else-if="trainState.status === 'done'" class="c-ok">✓ 完成<template v-if="trainState.result?.version">：模型 v{{ trainState.result.version }} · {{ trainState.result.samples }} 样本 · 出分 {{ trainState.result.scored }} 张</template><template v-else-if="trainState.result?.scored != null">：粗筛 {{ trainState.result.scored }} 张</template></span>
