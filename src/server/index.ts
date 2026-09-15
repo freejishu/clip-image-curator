@@ -87,8 +87,12 @@ storageRoutes(app);
 likeRoutes(app);
 authRoutes(app);
 
-// 生产模式：托管前端构建产物
-const webDist = path.resolve(process.cwd(), 'web/dist');
+// 生产模式：托管前端构建产物（cwd 容错：优先 cwd/web/dist，兜底模块相对路径）
+let webDist = path.resolve(process.cwd(), 'web/dist');
+if (!fs.existsSync(webDist)) {
+  const alt = path.resolve(import.meta.dirname, '../../web/dist');
+  if (fs.existsSync(alt)) webDist = alt;
+}
 if (fs.existsSync(webDist)) {
   // index.html 禁止缓存（hash 资源可强缓存，html 必须每次回源取最新引用）
   app.addHook('onSend', async (req, reply, payload) => {
@@ -106,6 +110,8 @@ if (fs.existsSync(webDist)) {
     if (req.url.startsWith('/api/')) return reply.code(404).send({ error: 'not found' });
     return reply.sendFile('index.html');
   });
+} else {
+  console.warn(`[warn] 未找到前端构建产物 ${webDist}，仅提供 /api 服务。请先执行 npm run build:web`);
 }
 
 await app.listen({ port: config.port, host: config.host ?? '127.0.0.1' });

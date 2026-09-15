@@ -9,6 +9,7 @@
     "dev:web": "vite web",
     "typecheck": "tsc --noEmit",
     "build:web": "vite build web",
+    "start": "npm run build:web && tsx src/server/index.ts",
     "reset-password": "tsx src/server/index.ts reset-password"
   },
   "dependencies": {
