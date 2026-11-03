@@ -18,9 +18,9 @@ import { config } from '../config.js';
 // ---- 硬编码的 web 端常量（X 改版后需手动更新）----
 const BEARER = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 const QUERY_IDS = {
-  UserMedia: 'YqiE4JL1KNgfO3n62PfxGw',
-  Likes: 'sr7e4eXK-8vZxSkJWxT9Aw',
-  SearchTimeline: 'nK1dw4oV3k4w5TdtcAdSww',
+  UserMedia: 'frYNjZhGZmtrgXmi_tIMkA',
+  Likes: 'a6ZbplAY_XzbVtjy_Ko_Q',
+  SearchTimeline: '3fEctOs2-FvTB7_mvm1hrQ',
 } as const;
 const GRAPHQL_BASE = 'https://x.com/i/api/graphql';
 
@@ -241,7 +241,7 @@ function tweetToMeta(tweet: TweetResult): ImageMeta[] {
 }
 
 // UserByScreenName 的 queryId（user-media 模式需要先解析用户 ID）
-const USER_BY_SCREEN_NAME_ID = 'G3KGOASz96M-Qu0nwmCSNg';
+const USER_BY_SCREEN_NAME_ID = 'AMIBMjtxEEATh4z8V9GtRg';
 
 async function getUserId(http: AxiosInstance, handle: string): Promise<string> {
   const screenName = handle.replace(/^@/, '');
