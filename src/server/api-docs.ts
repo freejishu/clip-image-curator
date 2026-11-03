@@ -1,7 +1,7 @@
 /**
  * 内置 API 文档数据（设置页「API → 接口文档」渲染源）。
  * ⚠️ 新增/修改路由时必须同步更新本文件 —— 这是人工维护的文档，不是自动生成的。
- * 最后同步：feat/auth（41 个接口）
+ * 最后同步：feat/x-source（44 个接口）
  */
 
 export interface ApiDocParam {
@@ -88,21 +88,26 @@ export const apiDocs: ApiDocGroup[] = [
       },
       {
         method: 'POST', path: '/api/tasks',
-        desc: '创建抓取任务（立即开始）。两种扫描方式：从头扫 limit 条；或范围扫（传 end，跳过 start 条扫 start..end）',
+        desc: '创建抓取任务（立即开始）。两种扫描方式：从头扫 limit 条；或范围扫（传 end，跳过 start 条扫 start..end）。X 数据源需传 kind/target，可选过滤模式',
         params: [
-          { name: 'source', in: 'body', type: 'string', required: true, desc: '数据源名，如 yandere' },
-          { name: 'tags', in: 'body', type: 'string[]', required: true, desc: '搜索标签，至少 1 个' },
+          { name: 'source', in: 'body', type: 'string', required: true, desc: '数据源名：yandere / x / mock' },
+          { name: 'tags', in: 'body', type: 'string[]', desc: '搜索标签（yandere 必填，至少 1 个；X 忽略）' },
           { name: 'limit', in: 'body', type: 'number', desc: '抓取条数，默认 100，范围 1-2000' },
           { name: 'start / end', in: 'body', type: 'number', desc: '范围扫描：0 ≤ start < end，单任务最多 2000 条（传 end 时 limit 失效）' },
           { name: 'proxy', in: 'body', type: 'string | null', desc: '代理地址，空值回落到数据源/全局默认代理' },
+          { name: 'kind', in: 'body', type: 'string', desc: 'X 专用：user-media=某用户媒体 / user-likes=我的喜欢 / search=关键词搜索' },
+          { name: 'target', in: 'body', type: 'string', desc: 'X 专用：user-media 填句柄（如 @artist），search 填搜索词，user-likes 留空' },
+          { name: 'sort', in: 'body', type: 'string', desc: 'X 专用：search 排序，top=热门（默认）/ latest=最新' },
+          { name: 'mode', in: 'body', type: 'string', desc: 'full=全扫（默认）/ filter=模型过滤（需已训练模型，409 否则）' },
+          { name: 'threshold', in: 'body', type: 'number', desc: '过滤模式阈值（0-1），默认 0.5' },
         ],
         response: `{ "id": 42 }`,
-        notes: '400 缺 source/tags 或范围不合法',
+        notes: '400 缺参数或范围不合法；409 过滤模式但无已训练模型',
       },
       {
         method: 'GET', path: '/api/tasks',
         desc: '最近 50 个任务（按 id 倒序），含状态/进度/错误信息',
-        response: `[{ "id": 42, "source": "yandere", "query": "{\\"tags\\":[\\"landscape\\"],\\"limit\\":100,\\"skip\\":0}", "status": "running", "seen": 100, "fetched": 60, "downloaded": 58, "target": 100, "error": null, "created_at": "…", "updated_at": "…", "finished_at": null }]`,
+        response: `[{ "id": 42, "source": "yandere", "query": "{\\"tags\\":[\\"landscape\\"],\\"limit\\":100,\\"skip\\":0}", "status": "running", "seen": 100, "fetched": 60, "downloaded": 58, "target": 100, "mode": "full", "threshold": 0.5, "filtered_out": 0, "error": null, "created_at": "…", "updated_at": "…", "finished_at": null }]`,
         notes: 'status: running / paused / done / error；进程重启后 running 残留自动变 paused',
       },
       {
@@ -277,8 +282,15 @@ export const apiDocs: ApiDocGroup[] = [
     endpoints: [
       {
         method: 'GET', path: '/api/settings',
-        desc: '当前路径配置',
-        response: `{ "dataDir": "…", "incoming": "…", "favorites": "…", "thumbs": "…", "models": "…" }`,
+        desc: '当前路径配置 + X cookie 配置状态',
+        response: `{ "dataDir": "…", "incoming": "…", "favorites": "…", "thumbs": "…", "models": "…", "xCookieSet": true }`,
+      },
+      {
+        method: 'POST', path: '/api/settings/x-cookie',
+        desc: '保存 X cookie（写入 config.json，重启后生效）。从浏览器 F12 复制 x.com 的完整 Cookie 头，驱动自动解析 auth_token + ct0',
+        params: [{ name: 'cookie', in: 'body', type: 'string', required: true, desc: '完整 Cookie 头字符串；空串 = 清除' }],
+        response: `{ "ok": true, "needRestart": true }`,
+        notes: '400 cookie 字段缺失',
       },
       {
         method: 'POST', path: '/api/settings/data-dir',

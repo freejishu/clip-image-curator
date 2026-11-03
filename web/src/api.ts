@@ -6,6 +6,7 @@ export interface Task {
   id: number; source: string; query: string; status: string;
   fetched: number; downloaded: number; target: number; seen: number; error: string | null; updated_at: string;
   created_at?: string; finished_at?: string | null;
+  mode?: string; threshold?: number; filtered_out?: number;
 }
 export interface Stats {
   total: number; downloaded: number; liked: number; disliked: number;
@@ -111,8 +112,8 @@ export const api = {
   label: (id: number, label: string) => req<{ ok: boolean; affected: number[] }>(`/api/images/${id}/label`, post({ label })),
   tasks: () => req<Task[]>('/api/tasks'),
   sources: () => req<{ name: string; enabled: boolean; caps: { fetchPost: boolean; fetchFamily: boolean } }[]>('/api/sources'),
-  createTask: (source: string, tags: string[], limit: number, proxy: string, range?: { start: number; end: number }) =>
-    req<{ id: number }>('/api/tasks', post({ source, tags, limit, proxy: proxy || null, ...(range ?? {}) })),
+  createTask: (source: string, tags: string[], limit: number, proxy: string, range?: { start: number; end: number }, xOpts?: { kind: string; target?: string; sort?: string }, filterOpts?: { mode: 'filter'; threshold: number }) =>
+    req<{ id: number }>('/api/tasks', post({ source, tags, limit, proxy: proxy || null, ...(range ?? {}), ...(xOpts ?? {}), ...(filterOpts ?? {}) })),
   pauseTask: (id: number) => req(`/api/tasks/${id}/pause`, post()),
   resumeTask: (id: number) => req(`/api/tasks/${id}/resume`, post()),
   stats: () => req<Stats>('/api/stats'),
@@ -131,7 +132,8 @@ export const api = {
   backfillStatus: () => req<{ running: boolean; done: number; total: number }>('/api/backfill-status'),
   cleanupNopath: () => req<{ deleted: number }>('/api/cleanup-nopath', post()),
   list: (params: string) => req<{ total: number; page: number; size: number; rows: (NextImage & { user_label: string | null })[] }>(`/api/images?${params}`),
-  settings: () => req<{ dataDir: string; incoming: string; favorites: string; thumbs: string; models: string }>('/api/settings'),
+  settings: () => req<{ dataDir: string; incoming: string; favorites: string; thumbs: string; models: string; xCookieSet?: boolean }>('/api/settings'),
+  saveXCookie: (cookie: string) => req<{ ok: boolean; needRestart: boolean }>('/api/settings/x-cookie', post({ cookie })),
   setDataDir: (p: string) => req<{ mode: 'use-existing' | 'empty'; needRestart?: boolean }>('/api/settings/data-dir', post({ path: p })),
   migrateDataDir: (p: string) => req<{ ok: boolean }>('/api/settings/migrate', post({ path: p })),
   migrateStatus: () => req<{ running: boolean; phase: string; done: number; total: number; error: string }>('/api/settings/migrate-status'),

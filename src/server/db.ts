@@ -66,6 +66,16 @@ try {
 try {
   db.exec('ALTER TABLE images ADD COLUMN imgproc TEXT'); // 图片转换/压缩规则指纹：同指纹跳过，规则变更才重处理
 } catch { /* column already exists */ }
+// 抓取模式（full=全扫 / filter=模型过滤）+ 过滤阈值 + 被过滤计数（2026-11 X 数据源 PRD）
+try {
+  db.exec(`ALTER TABLE tasks ADD COLUMN mode TEXT NOT NULL DEFAULT 'full'`);
+} catch { /* column already exists */ }
+try {
+  db.exec('ALTER TABLE tasks ADD COLUMN threshold REAL NOT NULL DEFAULT 0.5');
+} catch { /* column already exists */ }
+try {
+  db.exec('ALTER TABLE tasks ADD COLUMN filtered_out INTEGER NOT NULL DEFAULT 0');
+} catch { /* column already exists */ }
 // 兜底（幂等）：任何路径漏写 finished_at 的终态任务，用 updated_at 补上（耗时不再虚增）
 db.exec(`UPDATE tasks SET finished_at = updated_at WHERE finished_at IS NULL AND status IN ('done','paused','error')`);
 

@@ -16,6 +16,12 @@ export interface SearchQuery {
   limit: number;
   /** 范围扫描：跳过前 N 条结果再开始产出（缺省/0 = 从头扫） */
   skip?: number;
+  /** X 专用：扫描入口类型（user-media=某用户媒体 / user-likes=我的喜欢 / search=关键词搜索） */
+  kind?: 'user-media' | 'user-likes' | 'search';
+  /** X 专用：扫描目标（user-media 填句柄，search 填搜索词；user-likes 留空） */
+  target?: string;
+  /** X 专用：search 的排序（top=热门 / latest=最新），默认 top */
+  sort?: 'top' | 'latest';
 }
 
 export interface FetchOpts {

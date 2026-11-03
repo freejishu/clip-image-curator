@@ -14,7 +14,8 @@
   ],
   "sources": {
     "yandere": { "enabled": true, "proxy": null },
-    "mock": { "enabled": true }
+    "mock": { "enabled": true },
+    "x": { "enabled": true, "proxy": null, "cookie": null }
   },
   "zeroshot": {
     "positive": ["anime illustration of a beautiful landscape", "scenery anime illustration"],

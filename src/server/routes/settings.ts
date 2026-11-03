@@ -39,7 +39,23 @@ export function settingsRoutes(app: FastifyInstance) {
     favorites: config.storage.favorites,
     thumbs: path.join(config.dataDir, 'thumbs'),
     models: path.join(config.dataDir, 'models'),
+    xCookieSet: !!config.sources.x?.cookie, // 只暴露是否已配置，不回传 cookie 本体
   }));
+
+  // 保存 X cookie（写入 config.json，不改内存，重启后生效）
+  app.post('/api/settings/x-cookie', async (req, reply) => {
+    const { cookie } = req.body as { cookie?: string };
+    if (typeof cookie !== 'string') return reply.code(400).send({ error: '需要 cookie 字符串' });
+    const trimmed = cookie.trim();
+    const raw = readRawConfig();
+    if (!raw.sources || typeof raw.sources !== 'object') raw.sources = {};
+    const sources = raw.sources as Record<string, Record<string, unknown>>;
+    if (!sources.x || typeof sources.x !== 'object') sources.x = { enabled: true };
+    sources.x.cookie = trimmed || null; // 空串 = 清除
+    sources.x.enabled = true; // 配了 cookie 就启用
+    fs.writeFileSync(path.join(process.cwd(), 'config.json'), JSON.stringify(raw, null, 2) + '\n');
+    return { ok: true, needRestart: true };
+  });
 
   // 修改数据目录：目标已有有效数据（curator.db）→ 直接切换；没有 → 返回 empty 由前端询问是否迁移
   app.post('/api/settings/data-dir', async (req, reply) => {

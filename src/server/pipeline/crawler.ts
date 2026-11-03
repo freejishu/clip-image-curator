@@ -4,7 +4,8 @@ import { db } from '../db.js';
 import { getSource } from '../sources/index.js';
 import type { FetchOpts, ImageMeta } from '../sources/types.js';
 import { storage } from '../storage/backend.js';
-import { loadModel, scoreUnscored } from '../ml/classifier.js';
+import { loadModel, scoreUnscored, predictExternal } from '../ml/classifier.js';
+import { embedImageBuffer } from '../ml/embed.js';
 import { zeroshotScoreAll } from '../ml/zeroshot.js';
 import { config } from '../config.js';
 import { ruleFor, ruleFingerprint } from './transform.js';
@@ -50,6 +51,7 @@ function missingFile(meta: ImageMeta): boolean {
 export async function startTask(taskId: number): Promise<void> {
   const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as {
     source: string; query: string; proxy: string | null; target: number;
+    mode: string; threshold: number;
   } | undefined;
   if (!row) throw new Error(`任务不存在: ${taskId}`);
   if (running.has(taskId)) return; // 已在运行：resume 连点/旧实例未退出时不得再起并发实例（否则旧实例退出会误删新实例状态）
@@ -59,42 +61,85 @@ export async function startTask(taskId: number): Promise<void> {
   // 代理回落到当前配置：老任务（proxy 存了 NULL）resume 时也能吃到新配置里的默认代理，而不是永久直连
   const proxy = row.proxy || config.sources[row.source]?.proxy || config.proxy || null;
   const opts: FetchOpts = { proxy, shouldContinue: () => !state.paused };
-  const query = JSON.parse(row.query) as { tags: string[]; limit: number; skip?: number };
+  const query = JSON.parse(row.query) as { tags: string[]; limit: number; skip?: number; kind?: string; target?: string; sort?: string };
   const plugin = getSource(row.source);
+  const isFilter = row.mode === 'filter';
   const queue = new PQueue({ concurrency: 3, interval: 1000, intervalCap: 2 }); // 礼貌限速
 
   const touch = (fields: string, ...vals: (string | number)[]) =>
     db.prepare(`UPDATE tasks SET ${fields}, updated_at = datetime('now') WHERE id = ?`).run(...vals, taskId);
 
+  /** 过滤模式：下载→embedding→模型预测→达标才入库，不达标留 local_path=NULL 行 */
+  const processFiltered = async (meta: ImageMeta): Promise<void> => {
+    const filename = `${meta.source}_${meta.sourceId.replace(':', '_')}`;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (state.paused) return;
+      try {
+        const buf = await plugin.fetchImage(meta, opts);
+        // embedding 先于顶层 sharp（libvips 加载顺序坑：先 embed 后 sharp 可共存，反向会炸）
+        const vec = await embedImageBuffer(buf);
+        const pred = predictExternal(vec);
+        if (!pred) throw new Error('无已训练模型，过滤模式不可用');
+        if (pred.score >= row.threshold) {
+          // 达标：正式入库 + 直接写入本次算出的分数
+          const localPath = await storage.saveIncoming(buf, filename + extOf(meta.fileUrl, buf));
+          setLocalPathStmt.run(localPath, meta.source, meta.sourceId);
+          markProcessedStmt.run(ruleFingerprint(ruleFor(config.storage.type ?? 'local')), meta.source, meta.sourceId);
+          db.prepare('UPDATE images SET pred_score = ?, pred_version = ?, embedding = ? WHERE source = ? AND source_id = ?')
+            .run(pred.score, pred.version, Buffer.from(vec.buffer), meta.source, meta.sourceId);
+          touch('downloaded = downloaded + 1');
+        } else {
+          // 不达标：只留元数据行（local_path=NULL），不重复下载
+          touch('filtered_out = filtered_out + 1');
+        }
+        return;
+      } catch (e) {
+        if (attempt === 2) {
+          console.warn(`[task ${taskId}] 过滤模式处理失败 ${filename}: ${e instanceof Error ? e.message : e}`);
+          throw e;
+        }
+        await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+      }
+    }
+  };
+
+  /** 全扫模式（原有逻辑）：下载即入库 */
+  const processFull = async (meta: ImageMeta): Promise<void> => {
+    let filename = `${meta.source}_${meta.sourceId}`;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (state.paused) return; // 重试中途被暂停也要立即停
+      try {
+        const buf = await plugin.fetchImage(meta, opts); const file = filename + extOf(meta.fileUrl, buf);
+        const localPath = await storage.saveIncoming(buf, file);
+        setLocalPathStmt.run(localPath, meta.source, meta.sourceId);
+        markProcessedStmt.run(ruleFingerprint(ruleFor(config.storage.type ?? 'local')), meta.source, meta.sourceId);
+        touch('downloaded = downloaded + 1');
+        return;
+      } catch (e) {
+        if (attempt === 2) {
+          console.warn(`[task ${taskId}] 下载失败 ${filename}: ${e instanceof Error ? e.message : e}`); // 不再静默吞错，失败必须可见
+          throw new Error(`下载失败: ${filename}`);
+        }
+        await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+      }
+    }
+  };
+
   try {
-    for await (const batch of plugin.search({ tags: query.tags, limit: query.limit, skip: query.skip }, opts)) {
+    for await (const batch of plugin.search({ tags: query.tags, limit: query.limit, skip: query.skip, kind: query.kind as never, target: query.target, sort: query.sort as never }, opts)) {
       if (state.paused) { touch(`status = 'paused', finished_at = datetime('now')`); return; }
       touch('seen = seen + ?', batch.length);
       let added = 0;
       for (const meta of batch) {
         const inserted = insertImage(meta);
         if (inserted) added++;
-        if (inserted || missingFile(meta)) { // 新图 + 历史缺文件图都补下载
+        if (inserted || missingFile(meta)) { // 新图 + 历史缺文件图都补下载（过滤模式跳过已过滤图）
+          // 过滤模式下 local_path IS NULL 的行 = 已过滤废图，不重复下载
+          if (isFilter && !inserted && missingFile(meta)) continue;
           void queue.add(async () => {
             if (state.paused) return;
-            let filename = `${meta.source}_${meta.sourceId}`;
-            for (let attempt = 0; attempt < 3; attempt++) {
-              if (state.paused) return; // 重试中途被暂停也要立即停
-              try {
-                const buf = await plugin.fetchImage(meta, opts); const file = filename + extOf(meta.fileUrl, buf);
-                const localPath = await storage.saveIncoming(buf, file);
-                setLocalPathStmt.run(localPath, meta.source, meta.sourceId);
-                markProcessedStmt.run(ruleFingerprint(ruleFor(config.storage.type ?? 'local')), meta.source, meta.sourceId);
-                touch('downloaded = downloaded + 1');
-                return;
-              } catch (e) {
-                if (attempt === 2) {
-                  console.warn(`[task ${taskId}] 下载失败 ${filename}: ${e instanceof Error ? e.message : e}`); // 不再静默吞错，失败必须可见
-                  throw new Error(`下载失败: ${filename}`);
-                }
-                await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
-              }
-            }
+            if (isFilter) await processFiltered(meta);
+            else await processFull(meta);
           }).catch(() => {/* 单张失败不拖垮任务 */});
         }
       }

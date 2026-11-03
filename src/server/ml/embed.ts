@@ -35,7 +35,21 @@ export function getFeaturePipeline(): Promise<FeaturePipeline> {
 export async function embedImage(imagePath: string): Promise<Float32Array> {
   const pipe = await getFeaturePipeline();
   const out = await pipe(imagePath);
-  const vec = new Float32Array(out.data);
+  return normalize(out.data);
+}
+
+/** 从内存 buffer 直接 embedding（不落盘，供过滤模式用）。
+ *  注意：此路径会加载 transformers 内嵌的 sharp，必须先于任何顶层 sharp 使用（libvips 加载顺序坑）。 */
+export async function embedImageBuffer(buf: Buffer): Promise<Float32Array> {
+  const { RawImage } = await import('@huggingface/transformers');
+  const img = await RawImage.fromBlob(new Blob([new Uint8Array(buf)]));
+  const pipe = await getFeaturePipeline();
+  const out = await pipe(img as unknown as string);
+  return normalize(out.data);
+}
+
+function normalize(data: Float32Array): Float32Array {
+  const vec = new Float32Array(data);
   let norm = 0;
   for (const v of vec) norm += v * v;
   norm = Math.sqrt(norm) || 1;

@@ -150,10 +150,25 @@ const sources = ref<{ name: string; enabled: boolean; caps?: { fetchPost: boolea
 function srcCap(name: string, cap: 'fetchPost' | 'fetchFamily'): boolean {
   return sources.value.find(s => s.name === name)?.caps?.[cap] ?? false;
 }
-const newTask = ref({ source: 'yandere', tags: '', limit: 100, proxy: '', mode: 'head' as 'head' | 'range', start: 0, end: 200 });
+const newTask = ref({
+  source: 'yandere', tags: '', limit: 100, proxy: '', mode: 'head' as 'head' | 'range', start: 0, end: 200,
+  // X 专用
+  xKind: 'user-media' as 'user-media' | 'user-likes' | 'search', xTarget: '', xSort: 'top' as 'top' | 'latest',
+  // 过滤模式
+  filterMode: false, threshold: 0.5,
+});
+const hasModel = ref(false); // 是否有已训练模型（过滤模式前置条件）
 function taskQueryText(q: string): string {
-  const p = JSON.parse(q) as { tags: string[]; limit: number; skip?: number };
-  return p.skip ? `${p.tags.join(' ')}（范围 ${p.skip}~${p.skip + p.limit}）` : p.tags.join(' ');
+  const p = JSON.parse(q) as { tags?: string[]; limit: number; skip?: number; kind?: string; target?: string; sort?: string };
+  if (p.kind) {
+    // X 任务
+    const kindLabel = { 'user-media': '用户媒体', 'user-likes': '我的喜欢', 'search': '搜索' }[p.kind] ?? p.kind;
+    const tgt = p.target ? ` ${p.target}` : '';
+    const sort = p.sort === 'latest' ? '（最新）' : '';
+    return `${kindLabel}${tgt}${sort}`;
+  }
+  const tags = (p.tags ?? []).join(' ');
+  return p.skip ? `${tags}（范围 ${p.skip}~${p.skip + p.limit}）` : tags;
 }
 async function refreshTasks() {
   tasks.value = await api.tasks();
@@ -201,12 +216,26 @@ function predClass(s: number | null | undefined): string {
   return 'pred-low';
 }
 async function createTask() {
-  const tags = newTask.value.tags.split(/\s+/).filter(Boolean);
-  if (!tags.length) return alert('请输入至少一个 tag');
   const t = newTask.value;
+  const isX = t.source === 'x';
+  if (!isX) {
+    const tags = t.tags.split(/\s+/).filter(Boolean);
+    if (!tags.length) return alert('请输入至少一个 tag');
+  } else {
+    if (t.xKind !== 'user-likes' && !t.xTarget.trim()) return alert(t.xKind === 'user-media' ? '请输入用户句柄' : '请输入搜索词');
+    if (t.filterMode && !hasModel.value) return alert('过滤模式需要先训练模型');
+  }
   if (t.mode === 'range' && !(t.start >= 0 && t.end > t.start)) return alert('范围需满足 0 ≤ 开始 < 结束');
-  await api.createTask(t.source, tags, t.limit, t.proxy, t.mode === 'range' ? { start: t.start, end: t.end } : undefined);
+  await api.createTask(
+    t.source,
+    t.tags.split(/\s+/).filter(Boolean),
+    t.limit, t.proxy,
+    t.mode === 'range' ? { start: t.start, end: t.end } : undefined,
+    isX ? { kind: t.xKind, target: t.xTarget.trim() || undefined, sort: t.xSort } : undefined,
+    t.filterMode ? { mode: 'filter' as const, threshold: t.threshold } : undefined,
+  );
   newTask.value.tags = '';
+  newTask.value.xTarget = '';
   await refreshTasks();
 }
 
@@ -356,6 +385,7 @@ async function refreshModel() {
   stats.value = await api.stats();
   prefs.value = await api.preferences();
   trainState.value = await api.trainStatus();
+  hasModel.value = prefs.value.trained === true;
 }
 async function startTrain() { trainState.value = { status: 'running', progress: '已启动，正在加载模型…' }; await api.train(); pollTrain(); }
 async function startZeroshot() { trainState.value = { status: 'running', progress: '已启动，正在加载模型…' }; await api.zeroshot(); pollTrain(); }
@@ -398,7 +428,7 @@ async function onImportFile(ev: Event) {
 }
 
 // ---- 设置：数据目录 ----
-interface SettingsInfo { dataDir: string; incoming: string; favorites: string; thumbs: string; models: string }
+interface SettingsInfo { dataDir: string; incoming: string; favorites: string; thumbs: string; models: string; xCookieSet?: boolean }
 const settingsInfo = ref<SettingsInfo | null>(null);
 const newDir = ref('');
 const setMsg = ref('');
@@ -407,8 +437,26 @@ const needRestart = ref(false);
 const restarting = ref(false);
 const migrating = ref({ running: false, phase: '', done: 0, total: 0, error: '' });
 let migTimer: number | undefined;
+// X cookie
+const xCookieInput = ref('');
+const savingCookie = ref(false);
+const cookieMsg = ref('');
 
 async function loadSettings() { settingsInfo.value = await api.settings(); }
+
+async function saveXCookie() {
+  savingCookie.value = true;
+  cookieMsg.value = '';
+  try {
+    await api.saveXCookie(xCookieInput.value.trim());
+    cookieMsg.value = '✓ 已保存，需重启生效';
+    needRestart.value = true;
+    xCookieInput.value = '';
+    await loadSettings(); // 刷新 xCookieSet 状态
+  } catch (e) {
+    cookieMsg.value = `✕ ${e instanceof Error ? e.message : e}`;
+  } finally { savingCookie.value = false; }
+}
 
 async function saveDataDir() {
   const p = newDir.value.trim();
@@ -782,7 +830,22 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.removeE
         <select v-model="newTask.source">
           <option v-for="s in sources" :key="s.name" :value="s.name" :disabled="!s.enabled">{{ s.name }}</option>
         </select>
-        <input v-model="newTask.tags" placeholder="tags（空格分隔），如 landscape rating:s">
+        <template v-if="newTask.source !== 'x'">
+          <input v-model="newTask.tags" placeholder="tags（空格分隔），如 landscape rating:s">
+        </template>
+        <template v-else>
+          <select v-model="newTask.xKind">
+            <option value="user-media">用户媒体</option>
+            <option value="user-likes">我的喜欢</option>
+            <option value="search">搜索</option>
+          </select>
+          <input v-if="newTask.xKind === 'user-media'" v-model="newTask.xTarget" placeholder="用户句柄，如 @artist">
+          <input v-if="newTask.xKind === 'search'" v-model="newTask.xTarget" placeholder="搜索词">
+          <select v-if="newTask.xKind === 'search'" v-model="newTask.xSort">
+            <option value="top">热门</option>
+            <option value="latest">最新</option>
+          </select>
+        </template>
         <label style="white-space:nowrap"><input type="radio" value="head" v-model="newTask.mode">从头扫</label>
         <label style="white-space:nowrap"><input type="radio" value="range" v-model="newTask.mode">范围</label>
         <input v-if="newTask.mode === 'head'" v-model.number="newTask.limit" type="number" min="1" max="2000" style="width:90px" title="扫描条数">
@@ -794,17 +857,29 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.removeE
         <input v-model="newTask.proxy" placeholder="代理（留空用默认）" style="width:200px">
         <button type="submit">开始抓取</button>
       </form>
+      <!-- 过滤模式（X 专属，需已训练模型） -->
+      <div v-if="newTask.source === 'x'" class="filter-row">
+        <label style="white-space:nowrap">
+          <input type="checkbox" v-model="newTask.filterMode" :disabled="!hasModel"> 模型过滤
+        </label>
+        <template v-if="newTask.filterMode">
+          <input type="range" v-model.number="newTask.threshold" min="0.3" max="0.9" step="0.05" style="width:120px">
+          <span style="white-space:nowrap">≥ {{ newTask.threshold.toFixed(2) }}</span>
+        </template>
+        <span v-if="newTask.filterMode && !hasModel" class="lb-hint" style="color:#f59e0b">⚠ 需先在「模型与偏好」训练模型</span>
+      </div>
       <p v-if="newTask.mode === 'range'" class="lb-hint">范围 = 搜索结果的第「开始」到「结束」条（从 0 计，最新的在前），单任务最多扫 2000 条；更大范围请分段创建。</p>
       <div class="toolbar" style="margin:8px 0">
         <button @click="cleanupNopath">🧹 清理「抓到链接但未下载」的记录</button>
         <span v-if="cleanupMsg" class="c-ok">{{ cleanupMsg }}</span>
       </div>
       <table>
-        <thead><tr><th>ID</th><th>源</th><th>查询</th><th>状态</th><th>搜到/新增/下载</th><th>开始时间</th><th>耗时</th><th>错误</th><th>操作</th></tr></thead>
+        <thead><tr><th>ID</th><th>源</th><th>查询</th><th>模式</th><th>状态</th><th>搜到/新增/下载</th><th>开始时间</th><th>耗时</th><th>错误</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="t in tasks" :key="t.id">
             <td>{{ t.id }}</td><td>{{ t.source }}</td><td>{{ taskQueryText(t.query) }}</td>
-            <td>{{ t.status }}</td><td>搜到 {{ t.seen ?? 0 }} · 新增 {{ t.fetched }} · 下载 {{ t.downloaded }}/{{ t.target }}</td><td>{{ fmtTime(t.created_at) }}</td><td>{{ fmtDuration(t) }}</td><td>{{ t.error }}</td>
+            <td><span v-if="t.mode === 'filter'" class="mode-badge filter">过滤</span><span v-else class="mode-badge">全扫</span></td>
+            <td>{{ t.status }}</td><td>搜到 {{ t.seen ?? 0 }} · 新增 {{ t.fetched }} · 下载 {{ t.downloaded }}/{{ t.target }}<span v-if="t.filtered_out" class="lb-hint"> · 过滤 {{ t.filtered_out }}</span></td><td>{{ fmtTime(t.created_at) }}</td><td>{{ fmtDuration(t) }}</td><td>{{ t.error }}</td>
             <td>
               <button v-if="t.status === 'running'" :disabled="pausing.has(t.id)" @click="onPause(t.id)">{{ pausing.has(t.id) ? '暂停中…' : '暂停' }}</button>
               <button v-if="t.status === 'paused' || t.status === 'error'" @click="api.resumeTask(t.id).then(refreshTasks)">继续</button>
@@ -871,6 +946,18 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); window.removeE
           <button class="restart-btn" @click="doLogout">退出登录</button>
           <span v-if="acctMsg" :class="acctMsg.startsWith('✕') ? 'c-dislike' : 'c-ok'">{{ acctMsg }}</span>
         </div>
+
+        <h3 style="margin-top:24px">X (Twitter) Cookie</h3>
+        <p class="lb-hint">
+          从浏览器登录 x.com 后，F12 → Network → 任意请求 → 复制完整 Cookie 头粘贴到此处。
+          cookie 中的 auth_token 等同于账号密码，请勿泄露 config.json。保存后需重启生效。
+          当前状态：<b :class="settingsInfo?.xCookieSet ? 'c-ok' : 'c-dislike'">{{ settingsInfo?.xCookieSet ? '✓ 已配置' : '✕ 未配置' }}</b>
+        </p>
+        <div class="new-task">
+          <input v-model="xCookieInput" type="password" placeholder="粘贴完整 Cookie 头（含 auth_token=...; ct0=...）" style="flex:1">
+          <button :disabled="savingCookie" @click="saveXCookie">{{ savingCookie ? '保存中…' : '保存' }}</button>
+        </div>
+        <span v-if="cookieMsg" :class="cookieMsg.startsWith('✕') ? 'c-dislike' : 'c-ok'">{{ cookieMsg }}</span>
       </div>
 
       <!-- 模型与偏好 -->
@@ -1194,6 +1281,11 @@ figure.stack.bind-sel::after { content: '✓'; position: absolute; left: 4px; to
 .lb-pick { display: inline-flex; align-items: center; gap: 4px; color: #aaa; font-size: 13px; }
 .lb-num { width: 30px; height: 30px; border-radius: 6px; border: 1px solid #444; background: #2a2d34; color: #ccc; cursor: pointer; font-size: 13px; }
 .lb-num.on { background: #ffd479; color: #1a1a1a; font-weight: 700; border-color: #ffd479; }
+/* 任务列表模式徽标 + 过滤行 */
+.mode-badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 4px; background: #2a2d34; color: #888; }
+.mode-badge.filter { background: #1f4e79; color: #a7d3f3; }
+.filter-row { display: flex; gap: 10px; align-items: center; margin: -6px 0 10px; padding: 6px 0; font-size: 13px; color: #ccc; }
+.filter-row input[type=range] { accent-color: #3b82f6; }
 /* 移动端适配 */
 @media (max-width: 640px) {
   .app { padding: 8px; }
