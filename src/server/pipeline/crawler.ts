@@ -56,7 +56,9 @@ export async function startTask(taskId: number): Promise<void> {
 
   const state = { paused: false };
   running.set(taskId, state);
-  const opts: FetchOpts = { proxy: row.proxy, shouldContinue: () => !state.paused };
+  // 代理回落到当前配置：老任务（proxy 存了 NULL）resume 时也能吃到新配置里的默认代理，而不是永久直连
+  const proxy = row.proxy || config.sources[row.source]?.proxy || config.proxy || null;
+  const opts: FetchOpts = { proxy, shouldContinue: () => !state.paused };
   const query = JSON.parse(row.query) as { tags: string[]; limit: number; skip?: number };
   const plugin = getSource(row.source);
   const queue = new PQueue({ concurrency: 3, interval: 1000, intervalCap: 2 }); // 礼貌限速
